@@ -394,7 +394,7 @@ public:
 
         vk::ClearValue clearValues[2];
         clearValues[0].color = vkx::clearColor(glm::vec4(0));
-        clearValues[1].depthStencil = { 1.0f, 0 };
+        clearValues[1].depthStencil = vk::ClearDepthStencilValue(1.0f, 0);
 
         vk::RenderPassBeginInfo renderPassBeginInfo;
         renderPassBeginInfo.renderPass = renderPass;

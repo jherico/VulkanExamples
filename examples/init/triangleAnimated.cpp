@@ -65,7 +65,8 @@ public:
         // Update matrices
         uboVS.projectionMatrix = getProjection();
         uboVS.viewMatrix = glm::translate(glm::mat4(), camera.position);
-        camera.rotate(glm::angleAxis(frameTimer * 1.0f, glm::vec3(0, 1, 0)));
+        //camera.rotate(glm::angleAxis(frameTimer * 1.0f, glm::vec3(0, 1, 0)));
+        camera.rotate(glm::vec2(0.1, 0.1));
         uboVS.modelMatrix = glm::mat4_cast(camera.orientation);
         pendingUpdates.push_back(UpdateOperation(uniformDataVS.buffer, uboVS));
     }

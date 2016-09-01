@@ -140,7 +140,7 @@ public:
         clearValues[0].color = vkx::clearColor({ 0.0f, 0.0f, 0.0f, 0.0f });
         clearValues[1].color = vkx::clearColor({ 0.0f, 0.0f, 0.0f, 0.0f });
         clearValues[2].color = vkx::clearColor({ 0.0f, 0.0f, 0.0f, 0.0f });
-        clearValues[3].depthStencil = { 1.0f, 0 };
+        clearValues[3].depthStencil = vk::ClearDepthStencilValue(1.0f, 0);
 
         vk::RenderPassBeginInfo renderPassBeginInfo;
         renderPassBeginInfo.renderPass = offscreen.renderPass;

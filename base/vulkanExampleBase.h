@@ -373,7 +373,7 @@ namespace vkx {
         // Pure virtual function to be overriden by the dervice class
         // Called in case of an event where e.g. the framebuffer has to be rebuild and thus
         // all command buffers that may reference this
-        virtual void updateDrawCommandBuffer(const vk::CommandBuffer& drawCommand) = 0;
+      virtual void updateDrawCommandBuffer(const vk::CommandBuffer& drawCommand) {};
 
         void drawCurrentCommandBuffer(const vk::Semaphore& semaphore = vk::Semaphore()) {
             vk::Fence fence = swapChain.getSubmitFence();
