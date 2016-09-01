@@ -9,7 +9,7 @@
 
 #include <vector>
 #include <algorithm>
-#include <vulkan/vk_cpp.hpp>
+#include <vulkan/vulkan.hpp>
 
 namespace vkx {
     namespace shader {

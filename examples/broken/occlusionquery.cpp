@@ -75,7 +75,9 @@ public:
 
     VulkanExample() : vkx::ExampleBase(ENABLE_VALIDATION) {
         passedSamples[0] = passedSamples[1] = 1;
-        size = { 1280, 720 };
+        vk::Extent2D tst( 1280, 720 );
+        //size = { 1280, 720 };
+        size = tst;
         camera.setZoom(-35.0f);
         zoomSpeed = 2.5f;
         rotationSpeed = 0.5f;
@@ -202,7 +204,7 @@ public:
         clearAttachments[0].colorAttachment = 0;
 
         clearAttachments[1].aspectMask = vk::ImageAspectFlagBits::eDepth;
-        clearAttachments[1].clearValue.depthStencil = { 1.0f, 0 };
+        clearAttachments[1].clearValue.depthStencil = vk::ClearDepthStencilValue(1.0f, 0);
 
         vk::ClearRect clearRect;
         clearRect.layerCount = 1;

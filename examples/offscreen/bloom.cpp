@@ -142,7 +142,7 @@ public:
         // Horizontal blur
         vk::ClearValue clearValues[2];
         clearValues[0].color = vkx::clearColor({ 0.0f, 0.0f, 0.0f, 1.0f });
-        clearValues[1].depthStencil = { 1.0f, 0 };
+        clearValues[1].depthStencil = vk::ClearDepthStencilValue(1.0f, 0);
 
 
         offscreen.cmdBuffer.reset(vk::CommandBufferResetFlagBits::eReleaseResources);

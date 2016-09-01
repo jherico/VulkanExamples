@@ -13,11 +13,11 @@
 // Default fence timeout in nanoseconds
 #define DEFAULT_FENCE_TIMEOUT 100000000000
 
-#ifdef VK_CPP_HAS_UNRESTRICTED_UNIONS
+//#ifdef VK_CPP_HAS_UNRESTRICTED_UNIONS
 #define VK_CLEAR_COLOR_TYPE vk::ClearColorValue
-#else 
-#define VK_CLEAR_COLOR_TYPE VkClearColorValue
-#endif
+//#else 
+//#define VK_CLEAR_COLOR_TYPE VkClearColorValue
+//#endif
 
 namespace vkx {
 
@@ -26,7 +26,7 @@ namespace vkx {
     // The maximum possible major and minor version is 512 (look out nVidia)
     // while the maximum possible patch version is 2048
     struct Version {
-        Version() : major(0), minor(0), patch(0) {}
+        Version() : majorver (0), minorver (0), patch (0) {}
         Version(uint32_t version) : Version() { *this = version; }
 
         Version& operator =(uint32_t version) {
@@ -41,13 +41,13 @@ namespace vkx {
 
         std::string toString() const {
             std::stringstream buffer;
-            buffer << major << "." << minor << "." << patch;
+            buffer << majorver << "." << minorver << "." << patch;
             return buffer.str();
         }
 
         const uint32_t patch : 12;
-        const uint32_t minor : 10;
-        const uint32_t major : 10;
+        const uint32_t minorver : 10;
+        const uint32_t majorver : 10;
 
     };
 

@@ -6,7 +6,7 @@
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
 
-#include "vulkanexamplebase.h"
+#include "vulkanExampleBase.h"
 
 #define VERTEX_BUFFER_BIND_ID 0
 

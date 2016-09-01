@@ -46,6 +46,7 @@
 #define GLFW_EXPOSE_NATIVE_GLX 1
 #endif
 // Cross platform window creation
+#define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 #endif
@@ -111,7 +112,7 @@ public:
 #include <gli/gli.hpp>
 
 // Vulkan!
-#include <vulkan/vk_cpp.hpp>
+#include <vulkan/vulkan.hpp>
 
 // Boilerplate for running an example
 #if defined(__ANDROID__)
