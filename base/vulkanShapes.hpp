@@ -120,7 +120,7 @@ namespace vkx {
 
             vk::ClearValue clearValues[2];
             clearValues[0].color = vkx::clearColor(glm::vec4(0.2f, 0.2f, 0.2f, 1));
-            clearValues[1].depthStencil = { 1.0f, 0 };
+            clearValues[1].depthStencil = vk::ClearDepthStencilValue { 1.0f, 0 };
 
             vkx::setImageLayout(cmdBuffer, framebuffer.colors[0].image, vk::ImageAspectFlagBits::eColor, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
             vkx::setImageLayout(cmdBuffer, framebuffer.depth.image, vk::ImageAspectFlagBits::eDepth | vk::ImageAspectFlagBits::eStencil, vk::ImageLayout::eUndefined, vk::ImageLayout::eDepthStencilAttachmentOptimal);
