@@ -16,7 +16,7 @@ namespace vkx {
     // The maximum possible major and minor version is 512 (look out nVidia)
     // while the maximum possible patch version is 2048
     struct Version {
-        Version() : major(0), minor(0), patch(0) {
+        Version() : vulkan_major(0), vulkan_minor(0), vulkan_patch(0) {
         }
         Version(uint32_t version) : Version() {
             *this = version;
@@ -34,13 +34,13 @@ namespace vkx {
 
         std::string toString() const {
             std::stringstream buffer;
-            buffer << major << "." << minor << "." << patch;
+            buffer << vulkan_major << "." << vulkan_minor << "." << vulkan_patch;
             return buffer.str();
         }
 
-        const uint32_t patch : 12;
-        const uint32_t minor : 10;
-        const uint32_t major : 10;
+        const uint32_t vulkan_patch : 12;
+        const uint32_t vulkan_minor : 10;
+        const uint32_t vulkan_major : 10;
 
     };
 }
