@@ -140,8 +140,8 @@ public:
         vk::ImageBlit mirrorBlit;
         mirrorBlit.dstSubresource.aspectMask = mirrorBlit.srcSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
         mirrorBlit.dstSubresource.layerCount = mirrorBlit.srcSubresource.layerCount = 1;
-        mirrorBlit.srcOffsets[1] = { (int32_t)renderTargetSize.x, (int32_t)renderTargetSize.y, 1 };
-        mirrorBlit.dstOffsets[1] = { (int32_t)size.x, (int32_t)size.y, 1 };
+        mirrorBlit.srcOffsets[1] = vk::Offset3D { (int32_t)renderTargetSize.x, (int32_t)renderTargetSize.y, 1 };
+        mirrorBlit.dstOffsets[1] = vk::Offset3D { (int32_t)size.x, (int32_t)size.y, 1 };
 
         for (size_t i = 0; i < swapChain.imageCount; ++i) {
             vk::CommandBuffer& cmdBuffer = mirrorBlitCommands[i];
@@ -186,8 +186,8 @@ public:
                 vk::ImageBlit blit;
                 blit.dstSubresource.aspectMask = blit.srcSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
                 blit.dstSubresource.layerCount = blit.srcSubresource.layerCount = 1;
-                blit.srcOffsets[1] = { (int32_t)renderTargetSize.x / 2, (int32_t)renderTargetSize.y, 1 };
-                blit.dstOffsets[1] = { (int32_t)renderTargetSize.x / 2, (int32_t)renderTargetSize.y, 1 };
+                blit.srcOffsets[1] = vk::Offset3D { (int32_t)renderTargetSize.x / 2, (int32_t)renderTargetSize.y, 1 };
+                blit.dstOffsets[1] = vk::Offset3D { (int32_t)renderTargetSize.x / 2, (int32_t)renderTargetSize.y, 1 };
                 // Offset the source image for the right eye
                 if (eye == vr::Eye_Right) {
                     blit.srcOffsets[0].x = (int32_t)renderTargetSize.x / 2;

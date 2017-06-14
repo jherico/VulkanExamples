@@ -57,7 +57,8 @@ public:
 
     void prepareSwapchain() {
         swapChain.createSurface(window);
-        swapChain.create(vk::Extent2D { size.x, size.y });
+        auto extent2d = vk::Extent2D { size.x, size.y };
+        swapChain.create(extent2d);
     }
 
     void prepareRenderer() {
