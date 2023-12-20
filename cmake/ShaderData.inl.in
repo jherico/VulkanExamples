@@ -1,0 +1,16 @@
+#pragma once
+#include <array>
+
+// This file is generated. Do not edit it directly.
+// Edit @SHADER_FILE@ instead, and this file will automatically be regenerated on the next build
+namespace vkx {
+    namespace shaders {
+        namespace @TARGET_NAME@ {
+            namespace @SHADER_NAME@ {
+                constexpr std::array<uint32_t, @SHADER_TOKENS@> @SHADER_TYPE@ {{
+                    @SHADER_CODE@
+                }};
+            }
+        }
+    }
+}

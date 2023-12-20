@@ -1,13 +1,14 @@
 cmake_minimum_required(VERSION 3.12 FATAL_ERROR)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 include("cmake/defaults.cmake")
 set(NAME VulkanCppExamples)
 
 include(${CMAKE_SOURCE_DIR}/cmake/ezvcpkg/ezvcpkg.cmake)
 
 ezvcpkg_fetch(
-    COMMIT af2287382b1991dbdcb7e5112d236f3323b9dd7a
-    PACKAGES assimp basisu imgui glad glfw3 gli glm vulkan 
+    COMMIT 16ee2ecb31788c336ace8bb14c21801efb6836e4
+    PACKAGES assimp basisu glfw3 gli glm imgui openxr-loader vulkan vulkan-memory-allocator
     UPDATE_TOOLCHAIN
 )
 
@@ -17,11 +18,14 @@ if (NOT "${CMAKE_SIZEOF_VOID_P}" EQUAL "8")
     message( FATAL_ERROR "Only 64 bit builds supported." )
 endif()
 
+option(ENABLE_UI "help string describing option" 1)
+
+
 include("cmake/compiler.cmake")
 
 find_package(Threads REQUIRED)
 
-# This define is specific to Vulkan has a depth range of [0, 1], unlike OpenGL which has a [-1, 1] 
+# This define is specific to Vulkan has a depth range of [0, 1], unlike OpenGL which has a [-1, 1]
 add_definitions(-DGLM_FORCE_DEPTH_ZERO_TO_ONE)
 
 if (NOT ANDROID)
@@ -40,7 +44,6 @@ if (ANDROID)
     add_definitions(-DVULKAN_HPP_NO_SMART_HANDLE)
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -u ANativeActivity_onCreate")
     set(APP_GLUE_DIR ${ANDROID_NDK}/sources/android/native_app_glue)
-    include_directories(${APP_GLUE_DIR})
     add_library(app-glue STATIC ${APP_GLUE_DIR}/android_native_app_glue.c)
 endif()
 
@@ -54,13 +57,11 @@ else()
     link_libraries(${XCB_LIBRARIES})
 endif()
 
-add_subdirectory(base)
-
-include_directories(base)
 if (NOT WIN32)
     set(THREADS_PREFER_PTHREAD_FLAG ON)
     find_package(Threads REQUIRED)
     link_libraries(${CMAKE_THREAD_LIBS_INIT})
 endif()
 
-add_subdirectory(examples)
+include(cmake/shader_helpers.cmake)
+add_subdirectory(src)

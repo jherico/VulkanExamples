@@ -1,22 +1,19 @@
-set(CMAKE_CXX_FLAGS_DEBUG  "${CMAKE_CXX_FLAGS_DEBUG} -DDEBUG")
+include(CheckCXXCompilerFlag)
 
-if (WIN32)
+set(CMAKE_CXX_FLAGS_DEBUG  "${CMAKE_CXX_FLAGS_DEBUG} -DDEBUG")
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_STANDARD 20)
+
+if (MSVC)
     add_definitions(-DNOMINMAX)
     add_definitions(-D_USE_MATH_DEFINES)
-    add_definitions(-D_CRT_SECURE_NO_WARNINGS)
-
+    # Enable incremental compiling and "edit and continue"
+    add_compile_options("/ZI")
+    add_link_options("/INCREMENTAL")
+    CHECK_CXX_COMPILER_FLAG("/openmp" _openmp_supported)
+    if (_openmp_supported)
+        add_compile_options("/openmp")
+    endif()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /EHsc")
-    if (MSVC_VERSION GREATER_EQUAL 1910) # VS 2017
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /openmp")
-    endif()
-
-    if (MSVC_VERSION GREATER_EQUAL "1900")
-        include(CheckCXXCompilerFlag)
-        CHECK_CXX_COMPILER_FLAG("/std:c++latest" _cpp_latest_flag_supported)
-        if (_cpp_latest_flag_supported)
-            add_compile_options("/std:c++latest")
-        endif()
-    endif()
-
 endif()
 

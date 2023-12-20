@@ -1,11 +1,11 @@
-# 
+#
 #  CompileSpirvShader.cmake
-# 
+#
 #  Created by Bradley Austin Davis on 2016/06/23
 #
 #  Distributed under the Apache License, Version 2.0.
 #  See the accompanying file LICENSE or http://www.apache.org/licenses/LICENSE-2.0.html
-# 
+#
 
 function(COMPILE_SPIRV_SHADER SHADER_FILE)
     # Define the final name of the generated shader file
@@ -18,12 +18,12 @@ function(COMPILE_SPIRV_SHADER SHADER_FILE)
     set(COMPILE_OUTPUT "${SHADER_FILE}.debug.spv")
     set(OPTIMIZE_OUTPUT "${SHADER_FILE}.spv")
     add_custom_command(
-        OUTPUT ${COMPILE_OUTPUT} 
-        COMMAND ${GLSLANG_EXECUTABLE} -V ${SHADER_FILE} -o ${COMPILE_OUTPUT} 
+        OUTPUT ${COMPILE_OUTPUT}
+        COMMAND ${GLSLANG_EXECUTABLE} -V ${SHADER_FILE} -o ${COMPILE_OUTPUT}
         DEPENDS ${SHADER_FILE})
     add_custom_command(
-        OUTPUT ${OPTIMIZE_OUTPUT} 
-        COMMAND ${SPIRV_OPT_EXECUTABLE} -O ${COMPILE_OUTPUT} -o ${OPTIMIZE_OUTPUT} 
+        OUTPUT ${OPTIMIZE_OUTPUT}
+        COMMAND ${SPIRV_OPT_EXECUTABLE} -O ${COMPILE_OUTPUT} -o ${OPTIMIZE_OUTPUT}
         DEPENDS ${COMPILE_OUTPUT})
     set(COMPILE_SPIRV_SHADER_RETURN ${OPTIMIZE_OUTPUT} PARENT_SCOPE)
 endfunction()
