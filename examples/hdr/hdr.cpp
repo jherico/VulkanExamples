@@ -467,7 +467,7 @@ public:
 
 			// Color attachments
 
-			// Two floating point color buffers
+			// One floating point color buffers
 			createAttachment(VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, &filterPass.color[0]);
 
 			// Set up separate renderpass with references to the color and depth attachments
