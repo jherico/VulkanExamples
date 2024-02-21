@@ -7,48 +7,45 @@
 */
 
 #pragma once
+#if ENABLE_UI
 
-#include "vks/context.hpp"
-#ifdef __ANDROID__
-#include <android/native_activity.h>
-#endif
+#include <rendering/context.hpp>
+#include <rendering/texture.hpp>
 
 namespace vkx { namespace ui {
 
 struct UIOverlayCreateInfo {
-    vk::Queue copyQueue;
-    vk::RenderPass renderPass;
-    std::vector<vk::Framebuffer> framebuffers;
-    vk::Format colorformat;
-    vk::Format depthformat;
-    vk::Extent2D size;
-    std::vector<vk::PipelineShaderStageCreateInfo> shaders;
+    std::vector<vk::ImageView> colorAttachmentViews;
     vk::SampleCountFlagBits rasterizationSamples{ vk::SampleCountFlagBits::e1 };
-    uint32_t subpassCount{ 1 };
-    std::vector<vk::ClearValue> clearValues = {};
-    uint32_t attachmentCount = 1;
+    vk::Format colorFormat;
+    vk::Extent2D size;
+    //vk::ImageView depthStencilView;
+    //vk::Format depthFormat;
+    //std::vector<vk::PipelineShaderStageCreateInfo> shaders;
+    //uint32_t subpassCount{ 1 };
+    //std::vector<vk::ClearValue> clearValues = {};
+    //uint32_t attachmentCount = 1;
 };
 
 class UIOverlay {
 private:
     UIOverlayCreateInfo createInfo;
-    const vks::Context& context;
+    vks::QueueManager queueManager;
+    const vk::Device& device{ queueManager.device };
     vks::Buffer vertexBuffer;
     vks::Buffer indexBuffer;
-    int32_t vertexCount = 0;
-    int32_t indexCount = 0;
+    uint32_t vertexCount = 0;
+    uint32_t indexCount = 0;
 
     vk::DescriptorPool descriptorPool;
     vk::DescriptorSetLayout descriptorSetLayout;
     vk::DescriptorSet descriptorSet;
     vk::PipelineLayout pipelineLayout;
-    const vk::PipelineCache& pipelineCache{ context.pipelineCache };
     vk::Pipeline pipeline;
-    vk::RenderPass renderPass;
     vk::CommandPool commandPool;
     vk::Fence fence;
-
-    vks::Image font;
+    vk::Sampler fontSampler;
+    vks::texture::Texture2D font;
 
     struct PushConstBlock {
         glm::vec2 scale;
@@ -58,7 +55,6 @@ private:
 
     void prepareResources();
     void preparePipeline();
-    void prepareRenderPass();
     void updateCommandBuffers();
 
 public:
@@ -67,15 +63,14 @@ public:
 
     std::vector<vk::CommandBuffer> cmdBuffers;
 
-    explicit UIOverlay(const vks::Context& context)
-        : context(context) {}
+    explicit UIOverlay() {}
     ~UIOverlay();
 
-    void create(const UIOverlayCreateInfo& createInfo);
+    void create(const vks::QueueManager& queueManager, const UIOverlayCreateInfo& createInfo);
     void destroy();
 
     void update();
-    void resize(const vk::Extent2D& newSize, const std::vector<vk::Framebuffer>& framebuffers);
+    void resize(const vk::Extent2D& newSize, const std::vector<vk::ImageView>& views);
 
     void submit(const vk::Queue& queue, uint32_t bufferindex, vk::SubmitInfo submitInfo) const;
 
@@ -90,3 +85,4 @@ public:
     void text(const char* formatstr, ...) const;
 };
 }}  // namespace vkx::ui
+#endif

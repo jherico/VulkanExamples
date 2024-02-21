@@ -11,9 +11,8 @@
 #include <vector>
 #include <glm/glm.hpp>
 #include <vulkan/vulkan.hpp>
-
-#include "buffer.hpp"
-#include "context.hpp"
+#include <vks/pipelines.hpp>
+#include <vks/buffer.hpp>
 
 struct aiScene;
 namespace Assimp {
@@ -41,6 +40,21 @@ enum Component
 /** @brief Stores vertex layout components for model loading and Vulkan vertex input and atribute bindings  */
 struct VertexLayout {
 public:
+    void appendVertexLayout(vks::pipelines::PipelineVertexInputStateCreateInfo& vertexInputState,
+                            uint32_t binding = 0,
+                            vk::VertexInputRate rate = vk::VertexInputRate::eVertex) const {
+        vertexInputState.bindingDescriptions.emplace_back(binding, stride(), rate);
+        auto componentsSize = components.size();
+        vertexInputState.attributeDescriptions.reserve(vertexInputState.attributeDescriptions.size() + componentsSize);
+        auto attributeIndexOffset = (uint32_t)vertexInputState.attributeDescriptions.size();
+        for (uint32_t i = 0; i < componentsSize; ++i) {
+            const auto& component = components[i];
+            const auto format = vks::model::VertexLayout::componentFormat(component);
+            const auto offsetValue = offset(i);
+            vertexInputState.attributeDescriptions.emplace_back(attributeIndexOffset + i, binding, format, offsetValue);
+        }
+    }
+
     /** @brief Components used to generate vertices from */
     std::vector<Component> components;
     VertexLayout() = default;
@@ -159,6 +173,9 @@ struct Model {
         glm::vec3 size;
     } dim;
 
+    Model() = default;
+    Model(const Model&) = delete;
+    Model(Model&&) = default;
     /** @brief Release all Vulkan resources of this model */
     void destroy() {
         vertices.destroy();
@@ -172,14 +189,9 @@ struct Model {
     * @param filename File to load (must be a model format supported by ASSIMP)
     * @param layout Vertex layout components (position, normals, tangents, etc.)
     * @param createInfo MeshCreateInfo structure for load time settings like scale, center, etc.
-    * @param copyQueue Queue used for the memory staging copy commands (must support transfer)
     * @param (Optional) flags ASSIMP model loading flags
     */
-    void loadFromFile(const Context& context,
-                      const std::string& filename,
-                      const VertexLayout& layout,
-                      const ModelCreateInfo& createInfo,
-                      int flags = defaultFlags);
+    void loadFromFile(const std::string& filename, const VertexLayout& layout, const ModelCreateInfo& createInfo, int flags = defaultFlags);
 
     /**
     * Loads a 3D model from a file into Vulkan buffers
@@ -188,14 +200,13 @@ struct Model {
     * @param filename File to load (must be a model format supported by ASSIMP)
     * @param layout Vertex layout components (position, normals, tangents, etc.)
     * @param scale Load time scene scale
-    * @param copyQueue Queue used for the memory staging copy commands (must support transfer)
     * @param (Optional) flags ASSIMP model loading flags
     */
-    void loadFromFile(const Context& context, const std::string& filename, const VertexLayout& layout, float scale = 1.0f, const int flags = defaultFlags) {
-        loadFromFile(context, filename, layout, ModelCreateInfo{ scale, 1.0f, 0.0f }, flags);
+    void loadFromFile(const std::string& filename, const VertexLayout& layout, float scale = 1.0f, const int flags = defaultFlags) {
+        loadFromFile(filename, layout, ModelCreateInfo{ scale, 1.0f, 0.0f }, flags);
     }
 
-    virtual void onLoad(const Context& context, Assimp::Importer& importer, const aiScene* pScene) {}
+    virtual void onLoad(Assimp::Importer& importer, const aiScene* pScene) {}
 
     virtual void appendVertex(std::vector<uint8_t>& outputBuffer, const aiScene* pScene, uint32_t meshIndex, uint32_t vertexIndex);
 

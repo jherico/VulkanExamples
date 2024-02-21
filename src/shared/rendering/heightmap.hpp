@@ -9,9 +9,9 @@
 #include <glm/glm.hpp>
 #include <gli/gli.hpp>
 
-#include "vks/buffer.hpp"
-#include "vks/context.hpp"
-#include "vks/filesystem.hpp"
+#include <common/filesystem.hpp>
+#include <vks/buffer.hpp>
+#include <rendering/context.hpp>
 
 namespace vkx {
 class HeightMap {
@@ -21,7 +21,6 @@ private:
     uint32_t scale;
 
     //vk::Device device;
-    //vk::Queue copyQueue;
 public:
     enum Topology
     {
@@ -59,7 +58,7 @@ public:
         return heightdata[offset] / 65535.0f * heightScale;
     }
 
-    void loadFromFile(const vks::Context& context, const std::string& filename, uint32_t patchsize, glm::vec3 scale, Topology topology) {
+    void loadFromFile(const std::string& filename, uint32_t patchsize, glm::vec3 scale, Topology topology) {
         std::shared_ptr<gli::texture2d> tex2Dptr;
         vks::file::withBinaryFileContents(filename, [&](size_t size, const void* data) {
             tex2Dptr = std::make_shared<gli::texture2d>(gli::load((const char*)data, size));
@@ -155,8 +154,9 @@ public:
         assert(indexBufferSize > 0);
 
         vertexBufferSize = (patchsize * patchsize * 4) * sizeof(Vertex);
-        vertexBuffer = context.stageToDeviceBuffer<Vertex>(vk::BufferUsageFlagBits::eVertexBuffer, vertices);
-        indexBuffer = context.stageToDeviceBuffer<uint32_t>(vk::BufferUsageFlagBits::eIndexBuffer, indices);
+        const auto& loader = vks::Loader::get();
+        vertexBuffer = loader.stageToDeviceBuffer<Vertex>(vk::BufferUsageFlagBits::eVertexBuffer, vertices);
+        indexBuffer = loader.stageToDeviceBuffer<uint32_t>(vk::BufferUsageFlagBits::eIndexBuffer, indices);
     }
 };
 }  // namespace vkx

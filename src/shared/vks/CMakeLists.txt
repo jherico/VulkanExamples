@@ -7,4 +7,3 @@ target_include_directories(${TARGET_NAME} PUBLIC ${PROJECT_SOURCE_DIR}/src/share
 target_compile_definitions(${TARGET_NAME} PUBLIC VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1)
 
 target_vulkan()
-

@@ -8,34 +8,28 @@
 
 #pragma once
 
-#include "common.hpp"
+#include <common/common.hpp>
+#include <common/utils.hpp>
 
-#include "vks/vks.hpp"
-#include "vks/helpers.hpp"
-#include "vks/filesystem.hpp"
-#include "vks/model.hpp"
-#include "vks/shaders.hpp"
-#include "vks/pipelines.hpp"
-#include "vks/texture.hpp"
+#include <vks/vks.hpp>
+#include <vks/pipelines.hpp>
+#include <vks/helpers.hpp>
 
-#include "ui.hpp"
-#include "utils.hpp"
-#include "camera.hpp"
-#include "compute.hpp"
+#include <rendering/recycler.hpp>
+#include <rendering/model.hpp>
+#include <rendering/camera.hpp>
+#include <rendering/swapchain.hpp>
+#include <rendering/framequeue.hpp>
 
-#if defined(__ANDROID__)
-#include "AndroidNativeApp.hpp"
+#include <examples/glfw.hpp>
+#include <examples/keycodes.hpp>
+#ifdef ENABLE_UI
+#include <examples/ui.hpp>
 #endif
 
-#define GAMEPAD_BUTTON_A 0x1000
-#define GAMEPAD_BUTTON_B 0x1001
-#define GAMEPAD_BUTTON_X 0x1002
-#define GAMEPAD_BUTTON_Y 0x1003
-#define GAMEPAD_BUTTON_L1 0x1004
-#define GAMEPAD_BUTTON_R1 0x1005
-#define GAMEPAD_BUTTON_START 0x1006
-
 namespace vkx {
+
+constexpr size_t INVALID_VECTOR_INDEX = static_cast<size_t>(-1);
 
 struct UpdateOperation {
     const vk::Buffer buffer;
@@ -54,7 +48,35 @@ struct UpdateOperation {
     }
 };
 
+enum RenderStates : uint64_t
+{
+    NONE = 0x0,
+    COMPUTE_PRERENDER = 0x0000000000000200,
+    OFFSCREEN_PRERENDER = 0x0000000000000300,
+    RENDER_SCENE = 0x0000000000000400,
+    RENDER_UI = 0x0000000000000500,
+    COMPUTE_POST = 0x0000000000000600,
+    OFFSCREEN_POST = 0x0000000000000700,
+    COMPOSITE = 0x0000000000000800,
+};
+
+struct PerImageData {
+    vk::CommandBuffer commandBuffer;
+};
+
+struct PerFrameData {
+    vk::Semaphore semaphore;
+    uint32_t imageIndex{ 0 };
+    uint64_t finalState{ 0 };
+
+    void wait();
+    void reset();
+    void destroy();
+};
+
 class ExampleBase {
+    static vk::Extent2D EMPTY_RECT;
+
 protected:
     ExampleBase();
     ~ExampleBase();
@@ -75,7 +97,7 @@ protected:
 public:
     void run();
     // Called if the window is resized and some resources have to be recreatesd
-    void windowResize(const glm::uvec2& newSize);
+    void windowResize(const vk::Extent2D& newSize);
 
 private:
     // Set to true when the debug marker extension is detected
@@ -87,16 +109,19 @@ private:
 
 protected:
     bool enableVsync{ false };
+
     // Command buffers used for rendering
-    std::vector<vk::CommandBuffer> commandBuffers;
-    std::vector<vk::ClearValue> clearValues;
-    vk::RenderPassBeginInfo renderPassBeginInfo;
+    std::vector<PerFrameData> perFrameData;
+    std::vector<PerImageData> perImageData;
+    vks::frame::QueuedCommands currentFrameQueue;
+
     vk::Viewport viewport() { return vks::util::viewport(size); }
     vk::Rect2D scissor() { return vks::util::rect2D(size); }
 
-    virtual void clearCommandBuffers() final;
-    virtual void allocateCommandBuffers() final;
-    virtual void setupRenderPassBeginInfo();
+    const vks::QueueManager& getQueue(uint32_t queueFamilyIndex) const;
+    virtual void clearFrameData() final;
+    virtual void allocateFrameData() final;
+
     virtual void buildCommandBuffers();
 
 protected:
@@ -105,68 +130,70 @@ protected:
     // Frame counter to display fps
     uint32_t frameCounter{ 0 };
     uint32_t lastFPS{ 0 };
-
-    // Color buffer format
-    vk::Format colorformat{ vk::Format::eB8G8R8A8Unorm };
-
-    // Depth buffer format...  selected during Vulkan initialization
-    vk::Format depthFormat{ vk::Format::eUndefined };
-
-    // Global render pass for frame buffer writes
-    vk::RenderPass renderPass;
-
-    // List of available frame buffers (same as number of swap chain images)
-    std::vector<vk::Framebuffer> framebuffers;
     // Active frame buffer index
-    uint32_t currentBuffer = 0;
+    uint32_t currentIndex = 0;
     // Descriptor set pool
     vk::DescriptorPool descriptorPool;
 
-    void addRenderWaitSemaphore(const vk::Semaphore& semaphore, const vk::PipelineStageFlags& waitStages = vk::PipelineStageFlagBits::eBottomOfPipe);
+    vks::Context& context{ vks::Context::get() };
+    vks::Loader& loader{ vks::Loader::get() };
+    vks::Recycler& recycler{ vks::Recycler::get() };
 
-    std::vector<vk::Semaphore> renderWaitSemaphores;
-    std::vector<vk::PipelineStageFlags> renderWaitStages;
-    std::vector<vk::Semaphore> renderSignalSemaphores;
-
-    vks::Context context;
+    // The Vulkan instance
+    const vk::Instance& instance{ context.instance };
+    const vks::DeviceInfo& deviceInfo{ context.deviceInfo };
+    // The physical device handle, providing access to information about the device capabilities and features
     const vk::PhysicalDevice& physicalDevice{ context.physicalDevice };
+    // The logical device handle, providing access to runtime functionality
     const vk::Device& device{ context.device };
-    const vk::Queue& queue{ context.queue };
-    const vk::PhysicalDeviceFeatures& deviceFeatures{ context.deviceFeatures };
-    vk::PhysicalDeviceFeatures& enabledFeatures{ context.enabledFeatures };
-    vkx::ui::UIOverlay ui{ context };
-
+    const vk::Format& defaultColorFormat{ swapChain.surfaceFormat.format };
+    const vk::Format& defaultDepthStencilFormat{ deviceInfo.supportedDepthFormat };
     vk::SurfaceKHR surface;
+    vk::PipelineCache& pipelineCache{ context.pipelineCache };
+    vks::QueueManager graphicsQueue;
+    vks::QueueManager computeQueue;
+    vks::QueueManager transferQueue;
+    vk::Sampler defaultSampler;
+
+#if ENABLE_UI
+    vkx::ui::UIOverlay ui;
+#endif
+
     // Wraps the swap chain to present images (framebuffers) to the windowing system
-    vks::SwapChain swapChain;
+    vks::swapchain::Swapchain swapChain;
 
     // Synchronization semaphores
     struct {
         // Swap chain image presentation
-        vk::Semaphore acquireComplete;
-        // Command buffer submission and execution
-        vk::Semaphore renderComplete;
-        // UI buffer submission and execution
-        vk::Semaphore overlayComplete;
-#if 0
-        vk::Semaphore transferComplete;
-#endif
+        vk::SemaphoreSubmitInfo swapchainAcquire;
+        vk::SemaphoreSubmitInfo swapchainFilled;
     } semaphores;
 
     // Returns the base asset path (for shaders, models, textures) depending on the os
     const std::string& getAssetPath() { return ::vkx::getAssetPath(); }
 
 protected:
+    void queueCommandBuffer(const vks::frame::QueuedCommandBuilder& builder);
+    void queueCommandBuffer(const vk::CommandBuffer& cmdBuffer,
+                            uint64_t value,
+                            const vk::PipelineStageFlags2& pipelineStages,
+                            bool requiresSwapchainImage = false,
+                            const vk::ArrayProxy<const vk::SemaphoreSubmitInfo>& additionalWaitSemaphores = nullptr,
+                            const vk::ArrayProxy<const vk::SemaphoreSubmitInfo>& additionalSignalSemaphores = nullptr);
+
+    /** @brief Activates validation layers (and message output) when set to true */
+    bool& validation{ context.enableValidation };
+
     /** @brief Example settings that can be changed e.g. by command line arguments */
     struct Settings {
-        /** @brief Activates validation layers (and message output) when set to true */
-        bool validation = false;
         /** @brief Set to true if fullscreen mode has been requested via command line */
         bool fullscreen = false;
         /** @brief Set to true if v-sync will be forced for the swapchain */
         bool vsync = false;
+#if ENABLE_UI
         /** @brief Enable UI overlay */
         bool overlay = true;
+#endif
     } settings;
 
     struct {
@@ -179,11 +206,9 @@ protected:
         bool active = false;
     } benchmark;
 
-    // Command buffer pool
-    vk::CommandPool cmdPool;
-
     bool prepared = false;
-    uint32_t version = VK_MAKE_VERSION(1, 1, 0);
+    vk::Result lastPresent{ vk::Result::eSuccess };
+    uint32_t version{ VK_MAKE_VERSION(1, 3, 0) };
     vk::Extent2D size{ 1280, 720 };
     uint32_t& width{ size.width };
     uint32_t& height{ size.height };
@@ -194,6 +219,7 @@ protected:
     // Defines a frame rate independent timer value clamped from -1.0...1.0
     // For use in animations, rotations, etc.
     float timer = 0.0f;
+
     // Multiplier for speeding up (or slowing down) the global timer
     float timerSpeed = 0.25f;
 
@@ -211,6 +237,7 @@ protected:
     std::string title = "Vulkan Example";
     std::string name = "vulkanExample";
     vks::Image depthStencil;
+    vk::ImageView depthStencilView;
 
     // Gamepad state (only one pad supported)
     struct {
@@ -219,14 +246,15 @@ protected:
         float rz{ 0.0f };
     } gamePadState;
 
+#if ENABLE_UI
     void updateOverlay();
-
     virtual void OnUpdateUIOverlay() {}
     virtual void OnSetupUIOverlay(vkx::ui::UIOverlayCreateInfo& uiCreateInfo) {}
+#endif
 
     // Setup the vulkan instance, enable required extensions and connect to the physical device (GPU)
     virtual void initVulkan();
-    virtual void setupSwapchain();
+    virtual void waitIdle();
     virtual void setupWindow();
     virtual void getEnabledFeatures();
     // A default draw implementation
@@ -244,24 +272,26 @@ protected:
     virtual void windowResized() {}
 
     // Setup default depth and stencil views
-    void setupDepthStencil();
-    // Create framebuffers for all requested swap chain images
-    // Can be overriden in derived class to setup a custom framebuffer (e.g. for MSAA)
-    virtual void setupFrameBuffer();
+    virtual void setupSwapChainAndImages();
+    //void setupDepthStencil();
+    //virtual void createSwapchain();
 
-    // Setup a default render pass
-    // Can be overriden in derived class to setup a custom render pass (e.g. for MSAA)
-    virtual void setupRenderPass();
-
+#if ENABLE_UI
     void setupUi();
+    void drawCurrentUiBuffer();
+#endif
 
-    virtual void updateCommandBufferPreDraw(const vk::CommandBuffer& commandBuffer) {}
+    // Placeholders for things to happen before and after rendering the frame, such as for external graphicsQueue or API operations
+    virtual void preRender() {}
+    virtual void postRender() {}
+
+    virtual void updateCommandBufferPreDraw(const vk::CommandBuffer& commandBuffer);
 
     virtual void updateDrawCommandBuffer(const vk::CommandBuffer& commandBuffer) {}
 
-    virtual void updateCommandBufferPostDraw(const vk::CommandBuffer& commandBuffer) {}
+    virtual void updateCommandBufferPostDraw(const vk::CommandBuffer& commandBuffer);
 
-    void drawCurrentCommandBuffer();
+    virtual void drawCurrentCommandBuffer();
 
     // Prepare commonly used Vulkan functions
     virtual void prepare();
@@ -300,22 +330,16 @@ private:
     // OS specific
 #if defined(__ANDROID__)
     // true if application has focused, false if moved to background
-    ANativeWindow* window{ nullptr};
+    ANativeWindow* window{ nullptr };
     bool focused = false;
     static int32_t handle_input_event(android_app* app, AInputEvent* event);
     int32_t onInput(AInputEvent* event);
     static void handle_app_cmd(android_app* app, int32_t cmd);
     void onAppCmd(int32_t cmd);
 #else
-    GLFWwindow* window{ nullptr };
-    // Keyboard movement handler
-    virtual void mouseAction(int buttons, int action, int mods);
-    static void KeyboardHandler(GLFWwindow* window, int key, int scancode, int action, int mods);
-    static void MouseHandler(GLFWwindow* window, int button, int action, int mods);
-    static void MouseMoveHandler(GLFWwindow* window, double posx, double posy);
-    static void MouseScrollHandler(GLFWwindow* window, double xoffset, double yoffset);
-    static void FramebufferSizeHandler(GLFWwindow* window, int width, int height);
-    static void CloseHandler(GLFWwindow* window);
+    glfw::Window window;
 #endif
 };
 }  // namespace vkx
+
+// Image loading

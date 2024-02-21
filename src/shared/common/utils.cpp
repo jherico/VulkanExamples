@@ -1,13 +1,13 @@
 #include "utils.hpp"
 
-#include <mutex>
 #include <algorithm>
+#include <mutex>
 #include <stdarg.h>
 
 #if defined(__ANDROID__)
-#include <memory>
-#include <android/log.h>
 #include <android/configuration.h>
+#include <android/log.h>
+#include <memory>
 
 #else
 #ifdef WIN32
@@ -62,7 +62,7 @@ const std::string& vkx::getAssetPath() {
         std::replace(file.begin(), file.end(), '\\', '/');
         std::string::size_type lastSlash = file.rfind("/");
         file = file.substr(0, lastSlash);
-        path = file + "/../data/";
+        path = file + "/../../../data/";
     });
     return path;
 #endif

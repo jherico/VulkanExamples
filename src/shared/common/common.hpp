@@ -30,38 +30,16 @@
 #include <thread>
 #include <vector>
 
-#if defined(__ANDROID__)
-#include <android/native_activity.h>
-#include <android/asset_manager.h>
-#include <android_native_app_glue.h>
-#endif
-
 #include <glm/glm.hpp>
-
+#include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/noise.hpp>
-#include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
-#include <glm/gtx/rotate_vector.hpp>
-#include <glm/gtx/transform.hpp>
-#include <glm/gtx/quaternion.hpp>
-
-// Image loading
-#include <gli/gli.hpp>
-
-// Vulkan!
-#include <vulkan/vulkan.hpp>
-
-#include "keycodes.hpp"
-#if defined(__ANDROID__)
-#include "android.hpp"
-#else
-#include "gl.hpp"
-// Cross platform window management (except android)
-#include "glfw/glfw.hpp"
-#endif
+//#include <glm/gtx/rotate_vector.hpp>
+//#include <glm/gtx/transform.hpp>
+//#include <glm/gtx/quaternion.hpp>
 
 using glm::ivec2;
 using glm::mat3;
@@ -104,7 +82,6 @@ public:
     static const vec3& FRONT;
     static const vec3 ZERO4;
 };
-
 
 // Boilerplate for running an example
 #if defined(__ANDROID__)

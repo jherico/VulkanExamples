@@ -1,6 +1,10 @@
 #include "gl.hpp"
 
+#include <iostream>
+#include <vector>
+
 #if defined(WIN32)
+#include <Windows.h>
 #include <mutex>
 
 typedef PROC(APIENTRYP PFNWGLGETPROCADDRESS)(LPCSTR);
@@ -11,6 +15,9 @@ static void* getGlProcessAddress(const char* namez) {
     static HMODULE glModule = nullptr;
     if (!glModule) {
         glModule = LoadLibraryW(L"opengl32.dll");
+        if (!glModule) {
+            throw std::runtime_error("Failed to load opengl32.dll");
+        }
         glad_wglGetProcAddress = (PFNWGLGETPROCADDRESS)GetProcAddress(glModule, "wglGetProcAddress");
     }
 

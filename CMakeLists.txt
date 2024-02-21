@@ -7,7 +7,7 @@ set(NAME VulkanCppExamples)
 include(${CMAKE_SOURCE_DIR}/cmake/ezvcpkg/ezvcpkg.cmake)
 
 ezvcpkg_fetch(
-    COMMIT 16ee2ecb31788c336ace8bb14c21801efb6836e4
+    COMMIT 2024.02.14
     PACKAGES assimp basisu glfw3 gli glm imgui openxr-loader vulkan vulkan-memory-allocator
     UPDATE_TOOLCHAIN
 )

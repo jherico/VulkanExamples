@@ -10,15 +10,22 @@
 
 #pragma once
 
-#include "vks/offscreen.hpp"
-#include "vks/pipelines.hpp"
-#include "shapes.h"
-#include "easings.hpp"
-#include "utils.hpp"
+#include <random>
+
+#include <common/easings.hpp>
+#include <common/utils.hpp>
+
+#include <vks/pipelines.hpp>
+#include <vks/buffer.hpp>
+#include <vks/helpers.hpp>
+
+#include <rendering/shapes.hpp>
+#include <rendering/offscreen.hpp>
+#include <rendering/loader.hpp>
 
 namespace vkx {
-class ShapesRenderer : public OffscreenRenderer {
-    using Parent = vkx::OffscreenRenderer;
+class ShapesRenderer : public offscreen::Renderer {
+    using Parent = offscreen::Renderer;
 
 public:
     static const uint32_t SHAPES_COUNT{ 5 };
@@ -59,17 +66,21 @@ public:
 
     struct {
         vks::Buffer vsScene;
+        vk::DeviceSize alignment;
     } uniformData;
 
     struct {
         vk::Pipeline solid;
     } pipelines;
 
+    void waitIdle() { device.waitIdle(); }
+
+    vk::CommandBuffer cmdBuffer;
     std::vector<ShapeVertexData> shapes;
     vk::PipelineLayout pipelineLayout;
     vk::DescriptorSet descriptorSet;
+    vk::DescriptorPool descriptorPool;
     vk::DescriptorSetLayout descriptorSetLayout;
-    vk::CommandBuffer cmdBuffer;
     const vk::DescriptorType uniformType{ stereo ? vk::DescriptorType::eUniformBufferDynamic : vk::DescriptorType::eUniformBuffer };
     const float duration = 4.0f;
     const float interval = 6.0f;
@@ -85,57 +96,33 @@ public:
         glm::quat orientation;
 #endif
 
-    ShapesRenderer(const vks::Context& context, bool stereo = false)
-        : Parent(context)
-        , stereo(stereo) {
+    ShapesRenderer(bool stereo = false)
+        : stereo(stereo) {
         srand((uint32_t)time(NULL));
     }
 
     ~ShapesRenderer() {
-        queue.waitIdle();
-        device.waitIdle();
-        context.device.freeCommandBuffers(cmdPool, cmdBuffer);
-        context.device.destroyPipeline(pipelines.solid);
-        context.device.destroyPipelineLayout(pipelineLayout);
-        context.device.destroyDescriptorSetLayout(descriptorSetLayout);
+        waitIdle();
+        device.destroy(pipelines.solid);
+        device.destroy(pipelineLayout);
+        device.destroy(descriptorSetLayout);
         uniformData.vsScene.destroy();
     }
 
     void buildCommandBuffer() {
-        if (!cmdBuffer) {
-            vk::CommandBufferAllocateInfo cmdBufAllocateInfo;
-            cmdBufAllocateInfo.commandPool = cmdPool;
-            cmdBufAllocateInfo.commandBufferCount = 1;
-            cmdBufAllocateInfo.level = vk::CommandBufferLevel::ePrimary;
-            cmdBuffer = context.device.allocateCommandBuffers(cmdBufAllocateInfo)[0];
-        }
+        using namespace vks::util;
 
         cmdBuffer.reset(vk::CommandBufferResetFlagBits::eReleaseResources);
+        cmdBuffer.begin(vk::CommandBufferBeginInfo{ vk::CommandBufferUsageFlagBits::eSimultaneousUse });
+        for (auto& colorTarget : colorTargets) {
+            setImageLayout(cmdBuffer, colorTarget.image, ImageTransitionState::UNDEFINED, ImageTransitionState::COLOR_ATTACHMENT);
+        }
+        setImageLayout(cmdBuffer, depthTarget.image, ImageTransitionState::UNDEFINED, ImageTransitionState::DEPTH_ATTACHMENT);
 
-        vk::CommandBufferBeginInfo cmdBufInfo;
-        cmdBufInfo.flags = vk::CommandBufferUsageFlagBits::eSimultaneousUse;
-        cmdBuffer.begin(cmdBufInfo);
-
-        vk::ClearValue clearValues[2];
-        clearValues[0].color = vks::util::clearColor({ 0.2f, 0.2f, 0.2f, 1 });
-        clearValues[1].depthStencil = { 1.0f, 0 };
-
-        context.setImageLayout(cmdBuffer, framebuffer.colors[0].image, vk::ImageAspectFlagBits::eColor, vk::ImageLayout::eUndefined,
-                               vk::ImageLayout::eColorAttachmentOptimal);
-        context.setImageLayout(cmdBuffer, framebuffer.depth.image, vk::ImageAspectFlagBits::eDepth | vk::ImageAspectFlagBits::eStencil,
-                               vk::ImageLayout::eUndefined, vk::ImageLayout::eDepthStencilAttachmentOptimal);
-
-        vk::RenderPassBeginInfo renderPassBeginInfo;
-        renderPassBeginInfo.renderPass = renderPass;
-        renderPassBeginInfo.renderArea.extent.width = framebufferSize.x;
-        renderPassBeginInfo.renderArea.extent.height = framebufferSize.y;
-        renderPassBeginInfo.clearValueCount = 2;
-        renderPassBeginInfo.pClearValues = clearValues;
-        renderPassBeginInfo.framebuffer = framebuffer.framebuffer;
-        cmdBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
-        cmdBuffer.setScissor(0, vks::util::rect2D(framebufferSize));
+        cmdBuffer.beginRendering(renderingInfo);
+        cmdBuffer.setScissor(0, vks::util::rect2D(size));
         if (stereo) {
-            auto viewport = vks::util::viewport(framebufferSize);
+            auto viewport = vks::util::viewport(size);
             viewport.width /= 2.0f;
             cmdBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipelines.solid);
             // Binding point 0 : Mesh vertex buffer
@@ -145,12 +132,12 @@ public:
             for (uint32_t i = 0; i < 2; ++i) {
                 cmdBuffer.setViewport(0, viewport);
                 cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, descriptorSet,
-                                             { (uint32_t)i * (uint32_t)uniformData.vsScene.alignment });
+                                             { (uint32_t)i * (uint32_t)uniformData.alignment });
                 cmdBuffer.drawIndirect(indirectBuffer.buffer, 0, SHAPES_COUNT, sizeof(vk::DrawIndirectCommand));
                 viewport.x += viewport.width;
             }
         } else {
-            cmdBuffer.setViewport(0, vks::util::viewport(framebufferSize));
+            cmdBuffer.setViewport(0, vks::util::viewport(size));
             cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, descriptorSet, nullptr);
             cmdBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipelines.solid);
             // Binding point 0 : Mesh vertex buffer
@@ -159,7 +146,7 @@ public:
             cmdBuffer.bindVertexBuffers(1, instanceBuffer.buffer, { 0 });
             cmdBuffer.drawIndirect(indirectBuffer.buffer, 0, SHAPES_COUNT, sizeof(vk::DrawIndirectCommand));
         }
-        cmdBuffer.endRenderPass();
+        cmdBuffer.endRendering();
         cmdBuffer.end();
     }
 
@@ -203,7 +190,7 @@ public:
         for (auto& vertex : vertexData) {
             vertex.position *= 0.2f;
         }
-        meshes = context.stageToDeviceBuffer(vk::BufferUsageFlagBits::eVertexBuffer, vertexData);
+        meshes = vks::Loader::get().stageToDeviceBuffer(graphicsQueue, vk::BufferUsageFlagBits::eVertexBuffer, vertexData);
     }
 
     void setupDescriptorPool() {
@@ -236,9 +223,11 @@ public:
     }
 
     void preparePipelines() {
-        vks::pipelines::GraphicsPipelineBuilder builder{ device, pipelineLayout, renderPass };
-        builder.loadShader(getAssetPath() + "shaders/indirect/indirect.vert.spv", vk::ShaderStageFlagBits::eVertex);
-        builder.loadShader(getAssetPath() + "shaders/indirect/indirect.frag.spv", vk::ShaderStageFlagBits::eFragment);
+        vks::pipelines::GraphicsPipelineBuilder builder{ device, pipelineLayout };
+        builder.depthStencilState = true;
+        builder.dynamicRendering(colorTargets[0].image.createInfo.format, depthTarget.image.createInfo.format);
+        builder.loadShader(vkx::shaders::indirect::indirect::vert, vk::ShaderStageFlagBits::eVertex);
+        builder.loadShader(vkx::shaders::indirect::indirect::frag, vk::ShaderStageFlagBits::eFragment);
         // Mesh vertex buffer (description) at binding point 0
         builder.vertexInputState.bindingDescriptions = { { 0, sizeof(Vertex), vk::VertexInputRate::eVertex },
                                                          { 1, sizeof(InstanceData), vk::VertexInputRate::eInstance } };
@@ -270,7 +259,7 @@ public:
             drawIndirectCommand.firstVertex = (uint32_t)shapeData.baseVertex;
             drawIndirectCommand.vertexCount = (uint32_t)shapeData.vertices;
         }
-        indirectBuffer = context.stageToDeviceBuffer(vk::BufferUsageFlagBits::eIndirectBuffer, indirectData);
+        indirectBuffer = vks::Loader::get().stageToDeviceBuffer(graphicsQueue, vk::BufferUsageFlagBits::eIndirectBuffer, indirectData);
     }
 
     void prepareInstanceData() {
@@ -291,14 +280,18 @@ public:
             instance.pos *= instance.scale * (1.0f + expDist(rndGenerator) / 2.0f) * 4.0f;
         }
 
-        instanceBuffer = context.stageToDeviceBuffer(vk::BufferUsageFlagBits::eVertexBuffer, instanceData);
+        instanceBuffer = vks::Loader::get().stageToDeviceBuffer(graphicsQueue, vk::BufferUsageFlagBits::eVertexBuffer, instanceData);
     }
 
-    void prepareUniformBuffers() { uniformData.vsScene = context.createUniformBuffer(uboVS); }
+    void prepareUniformBuffers() {
+        auto& loader = vks::Loader::get();
+        uniformData.alignment = loader.getAlignedSize(sizeof(uboVS));
+        uniformData.vsScene = loader.createSizedUniformBuffer(uniformData.alignment * 2);
+    }
 
-    void prepare() {
-        depthFormat = context.getSupportedDepthFormat();
-        OffscreenRenderer::prepare();
+    void prepare(const vk::Extent2D& size) {
+        Renderer::prepare(vkx::offscreen::Builder::defaultBuilder(size));
+        colorAttachmentsInfo[0].clearValue = vks::util::clearColor({ 0.2f, 0.2f, 0.2f, 1 });
         loadShapes();
         prepareInstanceData();
         prepareIndirectData();
@@ -320,7 +313,8 @@ public:
 
         uboVS.projection = projections[1];
         uboVS.view = views[1];
-        uniformData.vsScene.copy(uboVS, uniformData.vsScene.alignment);
+        uniformData.vsScene.copy(uboVS, context.deviceInfo.properties.getUniformAlignedOffset(sizeof(uboVS), 1));
+
 #if 0
             frameTimer = deltaTime;
             if (!paused) {
@@ -344,16 +338,17 @@ public:
             }
 #endif
     }
-
+#if 0
     void render(const vk::ArrayProxy<const vks::Context::SemaphoreStagePair>& wait,
                 const vk::ArrayProxy<const vk::Semaphore>& signals,
                 const vk::Fence& fence = vk::Fence()) {
         context.submit(cmdBuffer, wait, signals, fence);
     }
 
-    void render() { render({ { semaphores.renderStart, vk::PipelineStageFlagBits::eBottomOfPipe } }, { semaphores.renderComplete }); }
+    void render() { render({ { semaphores.renderStart, vk::PipelineStageFlagBits::eBottomOfPipe } }, { semaphores.swapchainFilled }); }
 
     void renderWithoutSemaphores() { render({}, {}); }
+#endif
 };
 
 }  // namespace vkx

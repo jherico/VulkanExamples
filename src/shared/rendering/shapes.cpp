@@ -6,7 +6,7 @@
 //  See the accompanying file LICENSE or http://www.apache.org/licenses/LICENSE-2.0.html
 //
 
-#include "shapes.h"
+#include "shapes.hpp"
 
 namespace geometry {
 
@@ -48,14 +48,15 @@ const Solid<3>& tetrahedron() {
     static const auto B = vec3(1, -1, -1);
     static const auto C = vec3(-1, 1, -1);
     static const auto D = vec3(-1, -1, 1);
-    static const Solid<3> TETRAHEDRON = Solid<3>{ { A, B, C, D },
-                                                  FaceVector<3>{
-                                                      Face<3>{ { 0, 1, 2 } },
-                                                      Face<3>{ { 3, 1, 0 } },
-                                                      Face<3>{ { 2, 3, 0 } },
-                                                      Face<3>{ { 2, 1, 3 } },
-                                                  } }
-                                            .fitDimension(0.5f);
+    static const Solid<3> TETRAHEDRON = Solid<3>{
+        { A, B, C, D },
+        FaceVector<3>{
+            Face<3>{ { 0, 1, 2 } },
+            Face<3>{ { 3, 1, 0 } },
+            Face<3>{ { 2, 3, 0 } },
+            Face<3>{ { 2, 1, 3 } },
+        }
+    }.fitDimension(0.5f);
     return TETRAHEDRON;
 }
 
@@ -64,16 +65,17 @@ const Solid<4>& cube() {
     static const auto B = vec3(-1, 1, 1);
     static const auto C = vec3(-1, 1, -1);
     static const auto D = vec3(1, 1, -1);
-    static const Solid<4> CUBE = Solid<4>{ { A, B, C, D, -A, -B, -C, -D },
-                                           FaceVector<4>{
-                                               Face<4>{ { 3, 2, 1, 0 } },
-                                               Face<4>{ { 0, 1, 7, 6 } },
-                                               Face<4>{ { 1, 2, 4, 7 } },
-                                               Face<4>{ { 2, 3, 5, 4 } },
-                                               Face<4>{ { 3, 0, 6, 5 } },
-                                               Face<4>{ { 4, 5, 6, 7 } },
-                                           } }
-                                     .fitDimension(0.5f);
+    static const Solid<4> CUBE = Solid<4>{
+        { A, B, C, D, -A, -B, -C, -D },
+        FaceVector<4>{
+            Face<4>{ { 3, 2, 1, 0 } },
+            Face<4>{ { 0, 1, 7, 6 } },
+            Face<4>{ { 1, 2, 4, 7 } },
+            Face<4>{ { 2, 3, 5, 4 } },
+            Face<4>{ { 3, 0, 6, 5 } },
+            Face<4>{ { 4, 5, 6, 7 } },
+        }
+    }.fitDimension(0.5f);
     return CUBE;
 }
 
@@ -84,50 +86,51 @@ const Solid<3>& octahedron() {
     static const auto D = vec3(0, 0, -1);
     static const auto E = vec3(1, 0, 0);
     static const auto F = vec3(-1, 0, 0);
-    static const Solid<3> OCTAHEDRON = Solid<3>{ { A, B, C, D, E, F },
-                                                 FaceVector<3>{
-                                                     Face<3>{ {
-                                                         0,
-                                                         2,
-                                                         4,
-                                                     } },
-                                                     Face<3>{ {
-                                                         0,
-                                                         4,
-                                                         3,
-                                                     } },
-                                                     Face<3>{ {
-                                                         0,
-                                                         3,
-                                                         5,
-                                                     } },
-                                                     Face<3>{ {
-                                                         0,
-                                                         5,
-                                                         2,
-                                                     } },
-                                                     Face<3>{ {
-                                                         1,
-                                                         4,
-                                                         2,
-                                                     } },
-                                                     Face<3>{ {
-                                                         1,
-                                                         3,
-                                                         4,
-                                                     } },
-                                                     Face<3>{ {
-                                                         1,
-                                                         5,
-                                                         3,
-                                                     } },
-                                                     Face<3>{ {
-                                                         1,
-                                                         2,
-                                                         5,
-                                                     } },
-                                                 } }
-                                           .fitDimension(0.5f);
+    static const Solid<3> OCTAHEDRON = Solid<3>{
+        { A, B, C, D, E, F },
+        FaceVector<3>{
+            Face<3>{ {
+                0,
+                2,
+                4,
+            } },
+            Face<3>{ {
+                0,
+                4,
+                3,
+            } },
+            Face<3>{ {
+                0,
+                3,
+                5,
+            } },
+            Face<3>{ {
+                0,
+                5,
+                2,
+            } },
+            Face<3>{ {
+                1,
+                4,
+                2,
+            } },
+            Face<3>{ {
+                1,
+                3,
+                4,
+            } },
+            Face<3>{ {
+                1,
+                5,
+                3,
+            } },
+            Face<3>{ {
+                1,
+                2,
+                5,
+            } },
+        }
+    }.fitDimension(0.5f);
     return OCTAHEDRON;
 }
 
@@ -145,24 +148,25 @@ const Solid<5>& dodecahedron() {
     static const vec3 I = vec3(0, -IP, P);
     static const vec3 J = vec3(P, 0, IP);
 
-    static const Solid<5> DODECAHEDRON = Solid<5>{ {
-                                                       A, B, C, D, E, F, G, H, I, J, -A, -B, -C, -D, -E, -F, -G, -H, -I, -J,
-                                                   },
-                                                   FaceVector<5>{
-                                                       Face<5>{ { 0, 1, 2, 3, 4 } },
-                                                       Face<5>{ { 0, 5, 18, 6, 1 } },
-                                                       Face<5>{ { 1, 6, 19, 7, 2 } },
-                                                       Face<5>{ { 2, 7, 15, 8, 3 } },
-                                                       Face<5>{ { 3, 8, 16, 9, 4 } },
-                                                       Face<5>{ { 4, 9, 17, 5, 0 } },
-                                                       Face<5>{ { 14, 13, 12, 11, 10 } },
-                                                       Face<5>{ { 11, 16, 8, 15, 10 } },
-                                                       Face<5>{ { 12, 17, 9, 16, 11 } },
-                                                       Face<5>{ { 13, 18, 5, 17, 12 } },
-                                                       Face<5>{ { 14, 19, 6, 18, 13 } },
-                                                       Face<5>{ { 10, 15, 7, 19, 14 } },
-                                                   } }
-                                             .fitDimension(0.5f);
+    static const Solid<5> DODECAHEDRON = Solid<5>{
+        {
+            A, B, C, D, E, F, G, H, I, J, -A, -B, -C, -D, -E, -F, -G, -H, -I, -J,
+        },
+        FaceVector<5>{
+            Face<5>{ { 0, 1, 2, 3, 4 } },
+            Face<5>{ { 0, 5, 18, 6, 1 } },
+            Face<5>{ { 1, 6, 19, 7, 2 } },
+            Face<5>{ { 2, 7, 15, 8, 3 } },
+            Face<5>{ { 3, 8, 16, 9, 4 } },
+            Face<5>{ { 4, 9, 17, 5, 0 } },
+            Face<5>{ { 14, 13, 12, 11, 10 } },
+            Face<5>{ { 11, 16, 8, 15, 10 } },
+            Face<5>{ { 12, 17, 9, 16, 11 } },
+            Face<5>{ { 13, 18, 5, 17, 12 } },
+            Face<5>{ { 14, 19, 6, 18, 13 } },
+            Face<5>{ { 10, 15, 7, 19, 14 } },
+        }
+    }.fitDimension(0.5f);
     return DODECAHEDRON;
 }
 
@@ -176,30 +180,30 @@ const Solid<3>& icosahedron() {
     static const auto E = vec3(P, 0, -N);
     static const auto F = vec3(0, N, -P);
 
-    static const Solid<3> ICOSAHEDRON =
-        Solid<3>{ {
-                      A,
-                      B,
-                      C,
-                      D,
-                      E,
-                      F,
-                      -A,
-                      -B,
-                      -C,
-                      -D,
-                      -E,
-                      -F,
-                  },
-                  FaceVector<3>{
-                      Face<3>{ { 1, 2, 0 } },  Face<3>{ { 2, 3, 0 } },   Face<3>{ { 3, 4, 0 } },  Face<3>{ { 4, 5, 0 } },   Face<3>{ { 5, 1, 0 } },
+    static const Solid<3> ICOSAHEDRON = Solid<3>{
+        {
+            A,
+            B,
+            C,
+            D,
+            E,
+            F,
+            -A,
+            -B,
+            -C,
+            -D,
+            -E,
+            -F,
+        },
+        FaceVector<3>{
+            Face<3>{ { 1, 2, 0 } },  Face<3>{ { 2, 3, 0 } },   Face<3>{ { 3, 4, 0 } },  Face<3>{ { 4, 5, 0 } },   Face<3>{ { 5, 1, 0 } },
 
-                      Face<3>{ { 1, 10, 2 } }, Face<3>{ { 11, 2, 10 } }, Face<3>{ { 2, 11, 3 } }, Face<3>{ { 7, 3, 11 } },  Face<3>{ { 3, 7, 4 } },
-                      Face<3>{ { 8, 4, 7 } },  Face<3>{ { 4, 8, 5 } },   Face<3>{ { 9, 5, 8 } },  Face<3>{ { 5, 9, 1 } },   Face<3>{ { 10, 1, 9 } },
+            Face<3>{ { 1, 10, 2 } }, Face<3>{ { 11, 2, 10 } }, Face<3>{ { 2, 11, 3 } }, Face<3>{ { 7, 3, 11 } },  Face<3>{ { 3, 7, 4 } },
+            Face<3>{ { 8, 4, 7 } },  Face<3>{ { 4, 8, 5 } },   Face<3>{ { 9, 5, 8 } },  Face<3>{ { 5, 9, 1 } },   Face<3>{ { 10, 1, 9 } },
 
-                      Face<3>{ { 8, 7, 6 } },  Face<3>{ { 9, 8, 6 } },   Face<3>{ { 10, 9, 6 } }, Face<3>{ { 11, 10, 6 } }, Face<3>{ { 7, 11, 6 } },
-                  } }
-            .fitDimension(0.5f);
+            Face<3>{ { 8, 7, 6 } },  Face<3>{ { 9, 8, 6 } },   Face<3>{ { 10, 9, 6 } }, Face<3>{ { 11, 10, 6 } }, Face<3>{ { 7, 11, 6 } },
+        }
+    }.fitDimension(0.5f);
     return ICOSAHEDRON;
 }
 

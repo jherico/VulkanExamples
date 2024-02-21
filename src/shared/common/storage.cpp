@@ -7,12 +7,11 @@
 //
 
 #include "storage.hpp"
-#include <string>
 #include <cstring>
-#include <istream>
 #include <fstream>
+#include <istream>
 #include <iterator>
-
+#include <string>
 
 #if defined(WIN32)
 #include <Windows.h>
@@ -27,46 +26,16 @@ void setAssetManager(AAssetManager* assetManager) {
 }
 #endif
 
-class ViewStorage : public Storage {
-public:
-    ViewStorage(const StoragePointer& owner, size_t size, const uint8_t* data)
-        : _owner(owner)
-        , _size(size)
-        , _data(data) {}
-    const uint8_t* data() const override { return _data; }
-    size_t size() const override { return _size; }
-    bool isFast() const override { return _owner->isFast(); }
-
-private:
-    const StoragePointer _owner;
-    const size_t _size;
-    const uint8_t* _data;
-};
-
-StoragePointer Storage::createView(size_t viewSize, size_t offset) const {
-    auto selfSize = size();
-    if (0 == viewSize) {
-        viewSize = selfSize;
-    }
-    if ((viewSize + offset) > selfSize) {
-        return StoragePointer();
-        //TODO: Disable te exception for now and return an empty storage instead.
-        //throw std::runtime_error("Invalid mapping range");
-    }
-    return std::make_shared<ViewStorage>(shared_from_this(), viewSize, data() + offset);
-}
-
 class MemoryStorage : public Storage {
 public:
-    MemoryStorage(size_t size, const uint8_t* data = nullptr) {
-        _data.resize(size);
-        if (data) {
-            memcpy(_data.data(), data, size);
-        }
+    MemoryStorage(Span& span)
+        : MemoryStorage(span.size()) {
+        memcpy(_data.data(), span.data(), span.size());
     }
-    const uint8_t* data() const override { return _data.data(); }
-    size_t size() const override { return _data.size(); }
-    bool isFast() const override { return true; }
+
+    MemoryStorage(size_t size) { _data.resize(size); }
+
+    Span span() const override { return Span(_data); }
 
 private:
     std::vector<uint8_t> _data;
@@ -82,16 +51,14 @@ private:
 
 class FileStorage : public Storage {
 public:
-    static StoragePointer create(const std::string& filename, size_t size, const uint8_t* data);
+    static StoragePointer create(const std::string& filename, Span& span);
     FileStorage(const std::string& filename);
     ~FileStorage();
     // Prevent copying
     FileStorage(const FileStorage& other) = delete;
     FileStorage& operator=(const FileStorage& other) = delete;
 
-    const uint8_t* data() const override { return _mapped; }
-    size_t size() const override { return _size; }
-    bool isFast() const override { return false; }
+    Span span() const override { return Span(_mapped, _size); }
 
 private:
     size_t _size{ 0 };
@@ -125,7 +92,7 @@ FileStorage::FileStorage(const std::string& filename) {
         _size += (((size_t)dwFileSizeHigh) << 32);
     }
     _mapFile = CreateFileMappingA(_file, NULL, PAGE_READONLY, 0, 0, NULL);
-    if (_mapFile == INVALID_HANDLE_VALUE) {
+    if (_mapFile == INVALID_HANDLE_VALUE || _mapFile == nullptr) {
         throw std::runtime_error("Failed to create mapping");
     }
     _mapped = (uint8_t*)MapViewOfFile(_mapFile, FILE_MAP_READ, 0, 0, 0);
@@ -144,8 +111,8 @@ FileStorage::~FileStorage() {
 
 #endif
 
-StoragePointer Storage::create(size_t size, uint8_t* data) {
-    return std::make_shared<MemoryStorage>(size, data);
+StoragePointer Storage::create(Span& span) {
+    return std::make_shared<MemoryStorage>(span);
 }
 StoragePointer Storage::readFile(const std::string& filename) {
 #if MAPPED_FILES
@@ -164,14 +131,13 @@ StoragePointer Storage::readFile(const std::string& filename) {
     fileSize = file.tellg();
     file.seekg(0, std::ios::beg);
 
-
-	std::vector<uint8_t> fileData;
+    std::vector<uint8_t> fileData;
     // reserve capacity
     fileData.reserve(fileSize);
     // read the data:
     fileData.insert(fileData.begin(), std::istream_iterator<uint8_t>(file), std::istream_iterator<uint8_t>());
     file.close();
-	return std::make_shared<MemoryStorage>(fileData.size(), fileData.data());
+    return std::make_shared<MemoryStorage>(fileData.size(), fileData.data());
 #endif
 }
 

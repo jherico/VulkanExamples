@@ -2,28 +2,31 @@
 
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <istream>
 #include <iterator>
-#include <functional>
+#include <span>
 
 #include "storage.hpp"
 
 namespace vks { namespace file {
 
 void withBinaryFileContents(const std::string& filename, const SimpleHandler& handler) {
-    withBinaryFileContents(filename, [&handler](const char*, size_t size, const void* data_) { handler(size, data_); });
+    NamedHandler namedHandler = [&handler](const char*, Span span) { handler(span); };
+    withBinaryFileContents(filename, namedHandler);
 }
 
 void withBinaryFileContents(const std::string& filename, const NamedHandler& handler) {
     auto storage = storage::Storage::readFile(filename);
-    handler(filename.c_str(), storage->size(), storage->data());
+    vks::file::Span span = storage->span();
+    handler(filename.c_str(), span);
 }
 
 std::vector<uint8_t> readBinaryFile(const std::string& filename) {
     std::vector<uint8_t> result;
-    withBinaryFileContents(filename, [&result](size_t size, const void* data) {
-        result.resize(size);
-        memcpy(result.data(), data, size);
+    withBinaryFileContents(filename, [&result](Span span) {
+        result.resize(span.size());
+        memcpy(result.data(), span.data(), span.size());
     });
     return result;
 }

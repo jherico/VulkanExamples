@@ -3,6 +3,9 @@ namespace vks {
 struct Allocated;
 struct Buffer;
 struct Image;
-struct Context;
-struct SwapChain;
+
+struct DeviceInfo;
+struct QueuesInfo;
+struct QueueFamilyInfo;
+
 }  // namespace vks

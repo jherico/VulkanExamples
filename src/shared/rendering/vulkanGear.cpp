@@ -1,27 +1,30 @@
 /*
-* Vulkan Example - Animated gears using multiple uniform buffers
-*
-* See readme.md for details
-*
-* Copyright (C) 2015 by Sascha Willems - www.saschawillems.de
-*
-* This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
-*/
+ * Vulkan Example - Animated gears using multiple uniform buffers
+ *
+ * See readme.md for details
+ *
+ * Copyright (C) 2015 by Sascha Willems - www.saschawillems.de
+ *
+ * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
+ */
 
 #include "vulkanGear.h"
-#include <glm/gtc/matrix_transform.hpp>
+#include <glm/glm.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <rendering/loader.hpp>
 
-int32_t VulkanGear::newVertex(std::vector<Vertex>* vBuffer, float x, float y, float z, const glm::vec3& normal) {
-    Vertex v(glm::vec3(x, y, z), normal, color);
-    vBuffer->push_back(v);
-    return (uint32_t)vBuffer->size() - 1;
+int32_t VulkanGear::newVertex(std::vector<Vertex>& vBuffer, const glm::vec3& pos, const glm::vec3& normal) {
+    auto index = static_cast<uint32_t>(vBuffer.size());
+    vBuffer.emplace_back(pos, normal, color);
+    return index;
 }
 
-void VulkanGear::newFace(std::vector<uint32_t>* iBuffer, int a, int b, int c) {
-    iBuffer->push_back(a);
-    iBuffer->push_back(b);
-    iBuffer->push_back(c);
+void VulkanGear::newFace(std::vector<uint32_t>& iBuffer, const glm::uvec3& face) {
+    iBuffer.push_back(face.x);
+    iBuffer.push_back(face.y);
+    iBuffer.push_back(face.z);
 }
 
 VulkanGear::~VulkanGear() {
@@ -30,8 +33,7 @@ VulkanGear::~VulkanGear() {
     meshInfo.destroy();
 }
 
-void VulkanGear::generate(const vks::Context& context,
-                          float inner_radius,
+void VulkanGear::generate(float inner_radius,
                           float outer_radius,
                           float width,
                           int teeth,
@@ -40,7 +42,6 @@ void VulkanGear::generate(const vks::Context& context,
                           glm::vec3 pos,
                           float rotSpeed,
                           float rotOffset) {
-    device = context.device;
     this->color = color;
     this->pos = pos;
     this->rotOffset = rotOffset;
@@ -88,97 +89,101 @@ void VulkanGear::generate(const vks::Context& context,
 
         // front face
         normal = glm::vec3(0.0, 0.0, 1.0);
-        ix0 = newVertex(&vBuffer, r0 * cos_ta, r0 * sin_ta, width * 0.5f, normal);
-        ix1 = newVertex(&vBuffer, r1 * cos_ta, r1 * sin_ta, width * 0.5f, normal);
-        ix2 = newVertex(&vBuffer, r0 * cos_ta, r0 * sin_ta, width * 0.5f, normal);
-        ix3 = newVertex(&vBuffer, r1 * cos_ta_3da, r1 * sin_ta_3da, width * 0.5f, normal);
-        ix4 = newVertex(&vBuffer, r0 * cos_ta_4da, r0 * sin_ta_4da, width * 0.5f, normal);
-        ix5 = newVertex(&vBuffer, r1 * cos_ta_4da, r1 * sin_ta_4da, width * 0.5f, normal);
-        newFace(&iBuffer, ix0, ix1, ix2);
-        newFace(&iBuffer, ix1, ix3, ix2);
-        newFace(&iBuffer, ix2, ix3, ix4);
-        newFace(&iBuffer, ix3, ix5, ix4);
+        ix0 = newVertex(vBuffer, { r0 * cos_ta, r0 * sin_ta, width * 0.5f }, normal);
+        ix1 = newVertex(vBuffer, { r1 * cos_ta, r1 * sin_ta, width * 0.5f }, normal);
+        ix2 = newVertex(vBuffer, { r0 * cos_ta, r0 * sin_ta, width * 0.5f }, normal);
+        ix3 = newVertex(vBuffer, { r1 * cos_ta_3da, r1 * sin_ta_3da, width * 0.5f }, normal);
+        ix4 = newVertex(vBuffer, { r0 * cos_ta_4da, r0 * sin_ta_4da, width * 0.5f }, normal);
+        ix5 = newVertex(vBuffer, { r1 * cos_ta_4da, r1 * sin_ta_4da, width * 0.5f }, normal);
+        newFace(iBuffer, { ix0, ix1, ix2 });
+        newFace(iBuffer, { ix1, ix3, ix2 });
+        newFace(iBuffer, { ix2, ix3, ix4 });
+        newFace(iBuffer, { ix3, ix5, ix4 });
 
         // front sides of teeth
         normal = glm::vec3(0.0, 0.0, 1.0);
-        ix0 = newVertex(&vBuffer, r1 * cos_ta, r1 * sin_ta, width * 0.5f, normal);
-        ix1 = newVertex(&vBuffer, r2 * cos_ta_1da, r2 * sin_ta_1da, width * 0.5f, normal);
-        ix2 = newVertex(&vBuffer, r1 * cos_ta_3da, r1 * sin_ta_3da, width * 0.5f, normal);
-        ix3 = newVertex(&vBuffer, r2 * cos_ta_2da, r2 * sin_ta_2da, width * 0.5f, normal);
-        newFace(&iBuffer, ix0, ix1, ix2);
-        newFace(&iBuffer, ix1, ix3, ix2);
+        ix0 = newVertex(vBuffer, { r1 * cos_ta, r1 * sin_ta, width * 0.5f }, normal);
+        ix1 = newVertex(vBuffer, { r2 * cos_ta_1da, r2 * sin_ta_1da, width * 0.5f }, normal);
+        ix2 = newVertex(vBuffer, { r1 * cos_ta_3da, r1 * sin_ta_3da, width * 0.5f }, normal);
+        ix3 = newVertex(vBuffer, { r2 * cos_ta_2da, r2 * sin_ta_2da, width * 0.5f }, normal);
+        newFace(iBuffer, { ix0, ix1, ix2 });
+        newFace(iBuffer, { ix1, ix3, ix2 });
 
         // back face
         normal = glm::vec3(0.0, 0.0, -1.0);
-        ix0 = newVertex(&vBuffer, r1 * cos_ta, r1 * sin_ta, -width * 0.5f, normal);
-        ix1 = newVertex(&vBuffer, r0 * cos_ta, r0 * sin_ta, -width * 0.5f, normal);
-        ix2 = newVertex(&vBuffer, r1 * cos_ta_3da, r1 * sin_ta_3da, -width * 0.5f, normal);
-        ix3 = newVertex(&vBuffer, r0 * cos_ta, r0 * sin_ta, -width * 0.5f, normal);
-        ix4 = newVertex(&vBuffer, r1 * cos_ta_4da, r1 * sin_ta_4da, -width * 0.5f, normal);
-        ix5 = newVertex(&vBuffer, r0 * cos_ta_4da, r0 * sin_ta_4da, -width * 0.5f, normal);
-        newFace(&iBuffer, ix0, ix1, ix2);
-        newFace(&iBuffer, ix1, ix3, ix2);
-        newFace(&iBuffer, ix2, ix3, ix4);
-        newFace(&iBuffer, ix3, ix5, ix4);
+        ix0 = newVertex(vBuffer, { r1 * cos_ta, r1 * sin_ta, -width * 0.5f }, normal);
+        ix1 = newVertex(vBuffer, { r0 * cos_ta, r0 * sin_ta, -width * 0.5f }, normal);
+        ix2 = newVertex(vBuffer, { r1 * cos_ta_3da, r1 * sin_ta_3da, -width * 0.5f }, normal);
+        ix3 = newVertex(vBuffer, { r0 * cos_ta, r0 * sin_ta, -width * 0.5f }, normal);
+        ix4 = newVertex(vBuffer, { r1 * cos_ta_4da, r1 * sin_ta_4da, -width * 0.5f }, normal);
+        ix5 = newVertex(vBuffer, { r0 * cos_ta_4da, r0 * sin_ta_4da, -width * 0.5f }, normal);
+        newFace(iBuffer, { ix0, ix1, ix2 });
+        newFace(iBuffer, { ix1, ix3, ix2 });
+        newFace(iBuffer, { ix2, ix3, ix4 });
+        newFace(iBuffer, { ix3, ix5, ix4 });
 
         // back sides of teeth
         normal = glm::vec3(0.0, 0.0, -1.0);
-        ix0 = newVertex(&vBuffer, r1 * cos_ta_3da, r1 * sin_ta_3da, -width * 0.5f, normal);
-        ix1 = newVertex(&vBuffer, r2 * cos_ta_2da, r2 * sin_ta_2da, -width * 0.5f, normal);
-        ix2 = newVertex(&vBuffer, r1 * cos_ta, r1 * sin_ta, -width * 0.5f, normal);
-        ix3 = newVertex(&vBuffer, r2 * cos_ta_1da, r2 * sin_ta_1da, -width * 0.5f, normal);
-        newFace(&iBuffer, ix0, ix1, ix2);
-        newFace(&iBuffer, ix1, ix3, ix2);
+        ix0 = newVertex(vBuffer, { r1 * cos_ta_3da, r1 * sin_ta_3da, -width * 0.5f }, normal);
+        ix1 = newVertex(vBuffer, { r2 * cos_ta_2da, r2 * sin_ta_2da, -width * 0.5f }, normal);
+        ix2 = newVertex(vBuffer, { r1 * cos_ta, r1 * sin_ta, -width * 0.5f }, normal);
+        ix3 = newVertex(vBuffer, { r2 * cos_ta_1da, r2 * sin_ta_1da, -width * 0.5f }, normal);
+        newFace(iBuffer, { ix0, ix1, ix2 });
+        newFace(iBuffer, { ix1, ix3, ix2 });
 
         // draw outward faces of teeth
         normal = glm::vec3(v1, -u1, 0.0);
-        ix0 = newVertex(&vBuffer, r1 * cos_ta, r1 * sin_ta, width * 0.5f, normal);
-        ix1 = newVertex(&vBuffer, r1 * cos_ta, r1 * sin_ta, -width * 0.5f, normal);
-        ix2 = newVertex(&vBuffer, r2 * cos_ta_1da, r2 * sin_ta_1da, width * 0.5f, normal);
-        ix3 = newVertex(&vBuffer, r2 * cos_ta_1da, r2 * sin_ta_1da, -width * 0.5f, normal);
-        newFace(&iBuffer, ix0, ix1, ix2);
-        newFace(&iBuffer, ix1, ix3, ix2);
+        ix0 = newVertex(vBuffer, { r1 * cos_ta, r1 * sin_ta, width * 0.5f }, normal);
+        ix1 = newVertex(vBuffer, { r1 * cos_ta, r1 * sin_ta, -width * 0.5f }, normal);
+        ix2 = newVertex(vBuffer, { r2 * cos_ta_1da, r2 * sin_ta_1da, width * 0.5f }, normal);
+        ix3 = newVertex(vBuffer, { r2 * cos_ta_1da, r2 * sin_ta_1da, -width * 0.5f }, normal);
+        newFace(iBuffer, { ix0, ix1, ix2 });
+        newFace(iBuffer, { ix1, ix3, ix2 });
 
         normal = glm::vec3(cos_ta, sin_ta, 0.0);
-        ix0 = newVertex(&vBuffer, r2 * cos_ta_1da, r2 * sin_ta_1da, width * 0.5f, normal);
-        ix1 = newVertex(&vBuffer, r2 * cos_ta_1da, r2 * sin_ta_1da, -width * 0.5f, normal);
-        ix2 = newVertex(&vBuffer, r2 * cos_ta_2da, r2 * sin_ta_2da, width * 0.5f, normal);
-        ix3 = newVertex(&vBuffer, r2 * cos_ta_2da, r2 * sin_ta_2da, -width * 0.5f, normal);
-        newFace(&iBuffer, ix0, ix1, ix2);
-        newFace(&iBuffer, ix1, ix3, ix2);
+        ix0 = newVertex(vBuffer, { r2 * cos_ta_1da, r2 * sin_ta_1da, width * 0.5f }, normal);
+        ix1 = newVertex(vBuffer, { r2 * cos_ta_1da, r2 * sin_ta_1da, -width * 0.5f }, normal);
+        ix2 = newVertex(vBuffer, { r2 * cos_ta_2da, r2 * sin_ta_2da, width * 0.5f }, normal);
+        ix3 = newVertex(vBuffer, { r2 * cos_ta_2da, r2 * sin_ta_2da, -width * 0.5f }, normal);
+        newFace(iBuffer, { ix0, ix1, ix2 });
+        newFace(iBuffer, { ix1, ix3, ix2 });
 
         normal = glm::vec3(v2, -u2, 0.0);
-        ix0 = newVertex(&vBuffer, r2 * cos_ta_2da, r2 * sin_ta_2da, width * 0.5f, normal);
-        ix1 = newVertex(&vBuffer, r2 * cos_ta_2da, r2 * sin_ta_2da, -width * 0.5f, normal);
-        ix2 = newVertex(&vBuffer, r1 * cos_ta_3da, r1 * sin_ta_3da, width * 0.5f, normal);
-        ix3 = newVertex(&vBuffer, r1 * cos_ta_3da, r1 * sin_ta_3da, -width * 0.5f, normal);
-        newFace(&iBuffer, ix0, ix1, ix2);
-        newFace(&iBuffer, ix1, ix3, ix2);
+        ix0 = newVertex(vBuffer, { r2 * cos_ta_2da, r2 * sin_ta_2da, width * 0.5f }, normal);
+        ix1 = newVertex(vBuffer, { r2 * cos_ta_2da, r2 * sin_ta_2da, -width * 0.5f }, normal);
+        ix2 = newVertex(vBuffer, { r1 * cos_ta_3da, r1 * sin_ta_3da, width * 0.5f }, normal);
+        ix3 = newVertex(vBuffer, { r1 * cos_ta_3da, r1 * sin_ta_3da, -width * 0.5f }, normal);
+        newFace(iBuffer, { ix0, ix1, ix2 });
+        newFace(iBuffer, { ix1, ix3, ix2 });
 
         normal = glm::vec3(cos_ta, sin_ta, 0.0);
-        ix0 = newVertex(&vBuffer, r1 * cos_ta_3da, r1 * sin_ta_3da, width * 0.5f, normal);
-        ix1 = newVertex(&vBuffer, r1 * cos_ta_3da, r1 * sin_ta_3da, -width * 0.5f, normal);
-        ix2 = newVertex(&vBuffer, r1 * cos_ta_4da, r1 * sin_ta_4da, width * 0.5f, normal);
-        ix3 = newVertex(&vBuffer, r1 * cos_ta_4da, r1 * sin_ta_4da, -width * 0.5f, normal);
-        newFace(&iBuffer, ix0, ix1, ix2);
-        newFace(&iBuffer, ix1, ix3, ix2);
+        ix0 = newVertex(vBuffer, { r1 * cos_ta_3da, r1 * sin_ta_3da, width * 0.5f }, normal);
+        ix1 = newVertex(vBuffer, { r1 * cos_ta_3da, r1 * sin_ta_3da, -width * 0.5f }, normal);
+        ix2 = newVertex(vBuffer, { r1 * cos_ta_4da, r1 * sin_ta_4da, width * 0.5f }, normal);
+        ix3 = newVertex(vBuffer, { r1 * cos_ta_4da, r1 * sin_ta_4da, -width * 0.5f }, normal);
+        newFace(iBuffer, { ix0, ix1, ix2 });
+        newFace(iBuffer, { ix1, ix3, ix2 });
 
         // draw inside radius cylinder
-        ix0 = newVertex(&vBuffer, r0 * cos_ta, r0 * sin_ta, -width * 0.5f, glm::vec3(-cos_ta, -sin_ta, 0.0));
-        ix1 = newVertex(&vBuffer, r0 * cos_ta, r0 * sin_ta, width * 0.5f, glm::vec3(-cos_ta, -sin_ta, 0.0));
-        ix2 = newVertex(&vBuffer, r0 * cos_ta_4da, r0 * sin_ta_4da, -width * 0.5f, glm::vec3(-cos_ta_4da, -sin_ta_4da, 0.0));
-        ix3 = newVertex(&vBuffer, r0 * cos_ta_4da, r0 * sin_ta_4da, width * 0.5f, glm::vec3(-cos_ta_4da, -sin_ta_4da, 0.0));
-        newFace(&iBuffer, ix0, ix1, ix2);
-        newFace(&iBuffer, ix1, ix3, ix2);
+        ix0 = newVertex(vBuffer, { r0 * cos_ta, r0 * sin_ta, -width * 0.5f }, glm::vec3(-cos_ta, -sin_ta, 0.0));
+        ix1 = newVertex(vBuffer, { r0 * cos_ta, r0 * sin_ta, width * 0.5f }, glm::vec3(-cos_ta, -sin_ta, 0.0));
+        ix2 = newVertex(vBuffer, { r0 * cos_ta_4da, r0 * sin_ta_4da, -width * 0.5f }, glm::vec3(-cos_ta_4da, -sin_ta_4da, 0.0));
+        ix3 = newVertex(vBuffer, { r0 * cos_ta_4da, r0 * sin_ta_4da, width * 0.5f }, glm::vec3(-cos_ta_4da, -sin_ta_4da, 0.0));
+        newFace(iBuffer, { ix0, ix1, ix2 });
+        newFace(iBuffer, { ix1, ix3, ix2 });
     }
 
     // Generate vertex & index buffers
-    meshInfo.vertices = context.stageToDeviceBuffer(vk::BufferUsageFlagBits::eVertexBuffer, vBuffer);
-    meshInfo.indices = context.stageToDeviceBuffer(vk::BufferUsageFlagBits::eIndexBuffer, iBuffer);
+    auto& loader = vks::Loader::get();
+    vks::QueueManager queue = vks::QueueManager{ device, context.queuesInfo.graphics };
+
+    meshInfo.vertices = loader.stageToDeviceBuffer(queue, vk::BufferUsageFlagBits::eVertexBuffer, vBuffer);
+    meshInfo.indices = loader.stageToDeviceBuffer(queue, vk::BufferUsageFlagBits::eIndexBuffer, iBuffer);
     meshInfo.indexCount = (uint32_t)iBuffer.size();
+    queue.destroy();
 
     // Vertex shader uniform buffer block
-    uniformData = context.createUniformBuffer(ubo);
+    uniformData = loader.createUniformBuffer(ubo);
 }
 
 void VulkanGear::draw(vk::CommandBuffer cmdbuffer, vk::PipelineLayout pipelineLayout) {
@@ -195,7 +200,7 @@ void VulkanGear::updateUniformBuffer(const glm::mat4& perspective, const glm::ma
     ubo.model = glm::translate(glm::mat4(), pos) * glm::mat4_cast(glm::angleAxis(glm::radians((rotSpeed * timer) + rotOffset), glm::vec3(0, 0, 1)));
     ubo.normal = glm::inverseTranspose(ubo.view * ubo.model);
 
-    //ubo.lightPos = lightPos;
+    // ubo.lightPos = lightPos;
     ubo.lightPos = glm::vec3(0.0f, 0.0f, 2.5f);
     ubo.lightPos.x = sin(glm::radians(timer)) * 8.0f;
     ubo.lightPos.z = cos(glm::radians(timer)) * 8.0f;
@@ -206,6 +211,7 @@ void VulkanGear::updateUniformBuffer(const glm::mat4& perspective, const glm::ma
 void VulkanGear::setupDescriptorSet(vk::DescriptorPool pool, vk::DescriptorSetLayout descriptorSetLayout) {
     descriptorSet = device.allocateDescriptorSets({ pool, 1, &descriptorSetLayout })[0];
 
+    auto uniformDescriptor = uniformData.getDescriptor();
     // Binding 0 : Vertex shader uniform buffer
-    device.updateDescriptorSets({ { descriptorSet, 0, 0, 1, vk::DescriptorType::eUniformBuffer, nullptr, &uniformData.descriptor } }, nullptr);
+    device.updateDescriptorSets({ { descriptorSet, 0, 0, 1, vk::DescriptorType::eUniformBuffer, nullptr, &uniformDescriptor } }, nullptr);
 }

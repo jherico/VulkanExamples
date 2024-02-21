@@ -69,7 +69,7 @@ inline void executeImmediately(vk::Device device, vk::CommandPool commandPool, v
     queue.submit(submit, vk::Fence{});
     device.waitIdle();
 
-    device.freeCommandBuffers(commandPool, cbs);
+    device.free(commandPool, cbs);
 }
 
 /// Scale a value by mip level, but do not reduce to zero.
@@ -748,11 +748,9 @@ public:
 
     /// Create a self-deleting pipeline layout object.
     vk::UniquePipelineLayout createUnique(const vk::Device& device) const {
-        vk::PipelineLayoutCreateInfo pipelineLayoutInfo{ {},
-                                                         (uint32_t)setLayouts_.size(),
-                                                         setLayouts_.data(),
-                                                         (uint32_t)pushConstantRanges_.size(),
-                                                         pushConstantRanges_.data() };
+        vk::PipelineLayoutCreateInfo pipelineLayoutInfo{
+            {}, (uint32_t)setLayouts_.size(), setLayouts_.data(), (uint32_t)pushConstantRanges_.size(), pushConstantRanges_.data()
+        };
         return std::move(device.createPipelineLayoutUnique(pipelineLayoutInfo));
     }
 
@@ -1614,7 +1612,7 @@ public:
                     offset += ((bp.bytesPerBlock + 3) & ~3) * (width * height);
                 }
             }
-            setLayout(cb, vk::ImageLayout::eShaderReadOnlyOptimal);
+            setLayout(cb, vk::ImageLayout::eReadOnlyOptimal);
         });
     }
 
@@ -2152,7 +2150,7 @@ public:
                     image.copy(cb, buf, mipLevel, face, width, height, depth, offset(mipLevel, 0, face));
                 }
             }
-            image.setLayout(cb, vk::ImageLayout::eShaderReadOnlyOptimal);
+            image.setLayout(cb, vk::ImageLayout::eReadOnlyOptimal);
         });
     }
 

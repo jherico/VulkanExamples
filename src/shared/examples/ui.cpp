@@ -1,25 +1,35 @@
 /*
-* UI overlay class using ImGui
-*
-* Copyright (C) 2017 by Sascha Willems - www.saschawillems.de
-*
-* This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
-*/
+ * UI overlay class using ImGui
+ *
+ * Copyright (C) 2017 by Sascha Willems - www.saschawillems.de
+ *
+ * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
+ */
 
 #include "ui.hpp"
+#include <vks/debug.hpp>
+
+#if ENABLE_UI
 
 #include <imgui.h>
 
-#include "vks/helpers.hpp"
-#include "vks/pipelines.hpp"
+#include <rendering/recycler.hpp>
+#include <vks/helpers.hpp>
+#include <vks/pipelines.hpp>
 
-#include "utils.hpp"
-#include "android.hpp"
+#include <common/utils.hpp>
+#include <shaders/base/uioverlay.frag.inl>
+#include <shaders/base/uioverlay.vert.inl>
+
+#if defined(__ANDROID__)
+#include <android/android.hpp>
+#endif
 
 using namespace vkx;
 using namespace vkx::ui;
 
-void UIOverlay::create(const UIOverlayCreateInfo& createInfo_) {
+void UIOverlay::create(const vks::QueueManager& queueManager, const UIOverlayCreateInfo& createInfo_) {
+    this->queueManager = queueManager;
     createInfo = createInfo_;
 #if defined(__ANDROID__)
     // Screen density
@@ -52,11 +62,6 @@ void UIOverlay::create(const UIOverlayCreateInfo& createInfo_) {
     io.FontGlobalScale = scale;
 
     prepareResources();
-    if (createInfo.renderPass) {
-        renderPass = createInfo.renderPass;
-    } else {
-        prepareRenderPass();
-    }
     preparePipeline();
 }
 
@@ -70,16 +75,24 @@ void UIOverlay::destroy() {
         vertexBuffer.destroy();
         indexBuffer.destroy();
         font.destroy();
-        context.device.destroyDescriptorSetLayout(descriptorSetLayout);
-        context.device.destroyDescriptorPool(descriptorPool);
-        context.device.destroyPipelineLayout(pipelineLayout);
-        context.device.destroyPipeline(pipeline);
-        if (!createInfo.renderPass) {
-            context.device.destroyRenderPass(renderPass);
+        if (fontSampler) {
+            device.destroy(fontSampler);
+            fontSampler = nullptr;
         }
-        context.device.freeCommandBuffers(commandPool, cmdBuffers);
-        context.device.destroyCommandPool(commandPool);
-        context.device.destroyFence(fence);
+        device.destroy(descriptorSetLayout);
+        descriptorSetLayout = nullptr;
+        device.destroy(descriptorPool);
+        descriptorPool = nullptr;
+        device.destroy(pipelineLayout);
+        pipelineLayout = nullptr;
+        device.destroy(pipeline);
+        pipeline = nullptr;
+        device.free(commandPool, cmdBuffers);
+        cmdBuffers.clear();
+        device.destroy(commandPool);
+        commandPool = nullptr;
+        device.destroy(fence);
+        fence = nullptr;
         commandPool = nullptr;
     }
 }
@@ -89,106 +102,64 @@ void UIOverlay::prepareResources() {
     ImGuiIO& io = ImGui::GetIO();
 
     // Create font texture
-    std::vector<uint8_t> fontData;
-    int texWidth, texHeight;
     {
+        std::vector<uint8_t> fontData;
+        int texWidth, texHeight;
         unsigned char* fontBuffer;
         io.Fonts->GetTexDataAsRGBA32(&fontBuffer, &texWidth, &texHeight);
         vk::DeviceSize uploadSize = texWidth * texHeight * 4 * sizeof(char);
         fontData.resize(uploadSize);
         memcpy(fontData.data(), fontBuffer, uploadSize);
+        vks::Image::Builder fontBuilder{ (uint32_t)texWidth, (uint32_t)texHeight };
+        fontBuilder.withFormat(vk::Format::eR8G8B8A8Unorm);
+        fontBuilder.withUsage(vk::ImageUsageFlagBits::eSampled);
+        font.fromBuffer(fontData, fontBuilder);
     }
 
-    // Create target image for copy
-    vk::ImageCreateInfo imageInfo;
-    imageInfo.imageType = vk::ImageType::e2D;
-    imageInfo.format = vk::Format::eR8G8B8A8Unorm;
-    imageInfo.extent.width = texWidth;
-    imageInfo.extent.height = texHeight;
-    imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.usage = vk::ImageUsageFlagBits::eSampled;
-
-    font = context.stageToDeviceImage(imageInfo, fontData);
-
-    // Image view
-    vk::ImageViewCreateInfo viewInfo;
-    viewInfo.image = font.image;
-    viewInfo.viewType = vk::ImageViewType::e2D;
-    viewInfo.format = vk::Format::eR8G8B8A8Unorm;
-    viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.layerCount = 1;
-    font.view = context.device.createImageView(viewInfo);
-
-    // Font texture Sampler
-    vk::SamplerCreateInfo samplerInfo;
-    samplerInfo.magFilter = vk::Filter::eLinear;
-    samplerInfo.minFilter = vk::Filter::eLinear;
-    samplerInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
-    samplerInfo.addressModeU = vk::SamplerAddressMode::eClampToEdge;
-    samplerInfo.addressModeV = vk::SamplerAddressMode::eClampToEdge;
-    samplerInfo.addressModeW = vk::SamplerAddressMode::eClampToEdge;
-    samplerInfo.borderColor = vk::BorderColor::eFloatOpaqueWhite;
-    font.sampler = context.device.createSampler(samplerInfo);
+    // Create sampler
+    vk::SamplerCreateInfo samplerCreateInfo;
+    samplerCreateInfo.magFilter = vk::Filter::eNearest;
+    samplerCreateInfo.minFilter = vk::Filter::eNearest;
+    samplerCreateInfo.mipmapMode = vk::SamplerMipmapMode::eNearest;
+    samplerCreateInfo.maxAnisotropy = 1.0f;
+    fontSampler = device.createSampler(samplerCreateInfo);
 
     // Command buffer
-
-    vk::CommandPoolCreateInfo cmdPoolInfo;
-    cmdPoolInfo.queueFamilyIndex = context.queueIndices.graphics;
-    cmdPoolInfo.flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer;
-    commandPool = context.device.createCommandPool(cmdPoolInfo);
+    commandPool = queueManager.createCommandPool();
 
     // Descriptor pool
-    vk::DescriptorPoolSize poolSize;
-    poolSize.type = vk::DescriptorType::eCombinedImageSampler;
-    poolSize.descriptorCount = 1;
-    descriptorPool = context.device.createDescriptorPool({ {}, 2, 1, &poolSize });
+    vk::DescriptorPoolSize poolSize{ vk::DescriptorType::eCombinedImageSampler, 1 };
+    descriptorPool = device.createDescriptorPool({ {}, 2, poolSize });
 
     // Descriptor set layout
     vk::DescriptorSetLayoutBinding setLayoutBinding{ 0, vk::DescriptorType::eCombinedImageSampler, 1, vk::ShaderStageFlagBits::eFragment };
-
-    descriptorSetLayout = context.device.createDescriptorSetLayout({ {}, 1, &setLayoutBinding });
+    descriptorSetLayout = device.createDescriptorSetLayout({ {}, setLayoutBinding });
 
     // Descriptor set
-    vk::DescriptorSetAllocateInfo allocInfo;
-    allocInfo.descriptorPool = descriptorPool;
-    allocInfo.pSetLayouts = &descriptorSetLayout;
-    allocInfo.descriptorSetCount = 1;
-    descriptorSet = context.device.allocateDescriptorSets(allocInfo)[0];
+    descriptorSet = device.allocateDescriptorSets(vk::DescriptorSetAllocateInfo{ descriptorPool, descriptorSetLayout })[0];
 
-    vk::DescriptorImageInfo fontDescriptor;
-    fontDescriptor.imageView = font.view;
-    fontDescriptor.sampler = font.sampler;
-    fontDescriptor.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-    vk::WriteDescriptorSet writeDescriptorSet;
-    writeDescriptorSet.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-    writeDescriptorSet.pImageInfo = &fontDescriptor;
-    writeDescriptorSet.descriptorCount = 1;
-    writeDescriptorSet.dstSet = descriptorSet;
-    context.device.updateDescriptorSets(writeDescriptorSet, {});
+    auto fontImageInfo = font.makeDescriptor(fontSampler);
+    device.updateDescriptorSets(vk::WriteDescriptorSet{ descriptorSet, 0, 0, vk::DescriptorType::eCombinedImageSampler, fontImageInfo }, nullptr);
 
     // Pipeline layout
     // Push constants for UI rendering parameters
     vk::PushConstantRange pushConstantRange{ vk::ShaderStageFlagBits::eVertex, 0, sizeof(PushConstBlock) };
-    vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo{ {}, 1, &descriptorSetLayout, 1, &pushConstantRange };
-    pipelineLayout = context.device.createPipelineLayout(pipelineLayoutCreateInfo);
+    pipelineLayout = device.createPipelineLayout(vk::PipelineLayoutCreateInfo{ {}, descriptorSetLayout, pushConstantRange });
 
     // Command buffer execution fence
-    fence = context.device.createFence(vk::FenceCreateInfo{});
+    fence = device.createFence(vk::FenceCreateInfo{});
 }
 
 /** Prepare a separate pipeline for the UI overlay rendering decoupled from the main application */
 void UIOverlay::preparePipeline() {
     // Setup graphics pipeline for UI rendering
-    vks::pipelines::GraphicsPipelineBuilder pipelineBuilder(context.device, pipelineLayout, renderPass);
-    pipelineBuilder.depthStencilState = { false };
+    vks::pipelines::GraphicsPipelineBuilder pipelineBuilder(device, pipelineLayout);
+    pipelineBuilder.dynamicRendering(createInfo.colorFormat);
+    pipelineBuilder.multisampleState.rasterizationSamples = createInfo.rasterizationSamples;
     pipelineBuilder.rasterizationState.cullMode = vk::CullModeFlagBits::eNone;
-
     // Enable blending
-    pipelineBuilder.colorBlendState.blendAttachmentStates.resize(createInfo.attachmentCount);
-    for (uint32_t i = 0; i < createInfo.attachmentCount; i++) {
+    pipelineBuilder.colorBlendState.blendAttachmentStates.resize(1);
+    for (uint32_t i = 0; i < 1; i++) {
         auto& blendAttachmentState = pipelineBuilder.colorBlendState.blendAttachmentStates[i];
         blendAttachmentState.blendEnable = VK_TRUE;
         blendAttachmentState.srcColorBlendFactor = vk::BlendFactor::eSrcAlpha;
@@ -196,16 +167,8 @@ void UIOverlay::preparePipeline() {
         blendAttachmentState.srcAlphaBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha;
         blendAttachmentState.dstAlphaBlendFactor = vk::BlendFactor::eZero;
     }
-
-    pipelineBuilder.multisampleState.rasterizationSamples = createInfo.rasterizationSamples;
-
-    // Load default shaders if not specified by example
-    if (!createInfo.shaders.empty()) {
-        pipelineBuilder.shaderStages = createInfo.shaders;
-    } else {
-        pipelineBuilder.loadShader(vkx::getAssetPath() + "shaders/base/uioverlay.vert.spv", vk::ShaderStageFlagBits::eVertex);
-        pipelineBuilder.loadShader(getAssetPath() + "shaders/base/uioverlay.frag.spv", vk::ShaderStageFlagBits::eFragment);
-    }
+    pipelineBuilder.loadShader(vkx::shaders::base::uioverlay::vert, vk::ShaderStageFlagBits::eVertex);
+    pipelineBuilder.loadShader(vkx::shaders::base::uioverlay::frag, vk::ShaderStageFlagBits::eFragment);
 
     // Vertex bindings an attributes based on ImGui vertex definition
     pipelineBuilder.vertexInputState.bindingDescriptions = { { 0, sizeof(ImDrawVert), vk::VertexInputRate::eVertex } };
@@ -214,77 +177,34 @@ void UIOverlay::preparePipeline() {
         { 1, 0, vk::Format::eR32G32Sfloat, offsetof(ImDrawVert, uv) },    // Location 1: UV
         { 2, 0, vk::Format::eR8G8B8A8Unorm, offsetof(ImDrawVert, col) },  // Location 2: Color
     };
-    pipeline = pipelineBuilder.create(context.pipelineCache);
-}
-
-/** Prepare a separate render pass for rendering the UI as an overlay */
-void UIOverlay::prepareRenderPass() {
-    std::array<vk::AttachmentDescription, 2> attachments;
-
-    // Color attachment
-    attachments[0].format = createInfo.colorformat;
-    attachments[0].stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
-    attachments[0].stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
-    attachments[0].initialLayout = vk::ImageLayout::ePresentSrcKHR;
-    attachments[0].finalLayout = vk::ImageLayout::ePresentSrcKHR;
-
-    // Depth attachment
-    attachments[1].format = createInfo.depthformat;
-    attachments[1].loadOp = vk::AttachmentLoadOp::eDontCare;
-    attachments[1].storeOp = vk::AttachmentStoreOp::eDontCare;
-    attachments[1].stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
-    attachments[1].stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
-    attachments[1].finalLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
-
-    vk::AttachmentReference colorReference{ 0, vk::ImageLayout::eColorAttachmentOptimal };
-    vk::AttachmentReference depthReference{ 1, vk::ImageLayout::eDepthStencilAttachmentOptimal };
-    std::array<vk::SubpassDependency, 2> subpassDependencies;
-
-    // Transition from final to initial (VK_SUBPASS_EXTERNAL refers to all commmands executed outside of the actual renderpass)
-    subpassDependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
-    subpassDependencies[0].srcStageMask = vk::PipelineStageFlagBits::eBottomOfPipe;
-    subpassDependencies[0].dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
-    subpassDependencies[0].srcAccessMask = vk::AccessFlagBits::eMemoryRead;
-    subpassDependencies[0].dstAccessMask = vk::AccessFlagBits::eColorAttachmentRead | vk::AccessFlagBits::eColorAttachmentWrite;
-    subpassDependencies[0].dependencyFlags = vk::DependencyFlagBits::eByRegion;
-
-    // Transition from initial to final
-    subpassDependencies[1].srcSubpass = 0;
-    subpassDependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
-    subpassDependencies[1].srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
-    subpassDependencies[1].dstStageMask = vk::PipelineStageFlagBits::eBottomOfPipe;
-    subpassDependencies[1].srcAccessMask = vk::AccessFlagBits::eColorAttachmentRead | vk::AccessFlagBits::eColorAttachmentWrite;
-    subpassDependencies[1].dstAccessMask = vk::AccessFlagBits::eMemoryRead;
-    subpassDependencies[1].dependencyFlags = vk::DependencyFlagBits::eByRegion;
-
-    vk::SubpassDescription subpassDescription;
-    subpassDescription.pipelineBindPoint = vk::PipelineBindPoint::eGraphics;
-    subpassDescription.colorAttachmentCount = 1;
-    subpassDescription.pColorAttachments = &colorReference;
-    subpassDescription.pDepthStencilAttachment = &depthReference;
-
-    vk::RenderPassCreateInfo renderPassInfo;
-    renderPassInfo.attachmentCount = 2;
-    renderPassInfo.pAttachments = attachments.data();
-    renderPassInfo.subpassCount = 1;
-    renderPassInfo.pSubpasses = &subpassDescription;
-    renderPassInfo.dependencyCount = 2;
-    renderPassInfo.pDependencies = subpassDependencies.data();
-
-    renderPass = context.device.createRenderPass(renderPassInfo);
+    pipeline = pipelineBuilder.create({});
 }
 
 /** Update the command buffers to reflect UI changes */
 void UIOverlay::updateCommandBuffers() {
     vk::CommandBufferBeginInfo cmdBufInfo{ vk::CommandBufferUsageFlagBits::eSimultaneousUse };
 
-    vk::RenderPassBeginInfo renderPassBeginInfo;
-    renderPassBeginInfo.renderPass = renderPass;
-    renderPassBeginInfo.renderArea.extent = createInfo.size;
-    renderPassBeginInfo.clearValueCount = static_cast<uint32_t>(createInfo.clearValues.size());
-    renderPassBeginInfo.pClearValues = createInfo.clearValues.data();
-
     ImGuiIO& io = ImGui::GetIO();
+
+    vk::RenderingAttachmentInfo colorAttachmentInfo;
+    colorAttachmentInfo.imageLayout = vk::ImageLayout::eAttachmentOptimal;
+    colorAttachmentInfo.loadOp = vk::AttachmentLoadOp::eLoad;
+    colorAttachmentInfo.storeOp = vk::AttachmentStoreOp::eStore;
+    colorAttachmentInfo.clearValue = vks::util::clearColor(glm::vec4({ 0.025f, 0.025f, 0.025f, 1.0f }));
+
+    // vk::RenderingAttachmentInfo depthAttachmentInfo;
+    // depthAttachmentInfo.imageLayout = vk::ImageLayout::eAttachmentOptimal;
+    // depthAttachmentInfo.loadOp = vk::AttachmentLoadOp::eClear;
+    // depthAttachmentInfo.storeOp = vk::AttachmentStoreOp::eDontCare;
+    // depthAttachmentInfo.clearValue = vk::ClearDepthStencilValue{ 0.0, 0 };
+    // depthAttachmentInfo.imageView = createInfo.depthStencilView;
+
+    vk::RenderingInfo renderingInfo;
+    renderingInfo.colorAttachmentCount = 1;
+    renderingInfo.layerCount = 1;
+    renderingInfo.pColorAttachments = &colorAttachmentInfo;
+    // renderingInfo.pDepthAttachment = &depthAttachmentInfo;
+    renderingInfo.renderArea = vk::Rect2D{ vk::Offset2D{}, createInfo.size };
 
     const vk::Viewport viewport{ 0.0f, 0.0f, io.DisplaySize.x, io.DisplaySize.y, 0.0f, 1.0f };
     const vk::Rect2D scissor{ {}, vk::Extent2D{ (uint32_t)io.DisplaySize.x, (uint32_t)io.DisplaySize.y } };
@@ -293,33 +213,24 @@ void UIOverlay::updateCommandBuffers() {
     pushConstBlock.translate = glm::vec2(-1.0f);
 
     if (cmdBuffers.size()) {
-        context.trashAll<vk::CommandBuffer>(cmdBuffers,
-                                            [this](const std::vector<vk::CommandBuffer>& buffers) { context.device.freeCommandBuffers(commandPool, buffers); });
+        vks::Recycler::get().trashCommandBuffers(commandPool, cmdBuffers);
         cmdBuffers.clear();
     }
 
-    cmdBuffers = context.device.allocateCommandBuffers({ commandPool, vk::CommandBufferLevel::ePrimary, (uint32_t)createInfo.framebuffers.size() });
+    cmdBuffers = device.allocateCommandBuffers({ commandPool, vk::CommandBufferLevel::ePrimary, (uint32_t)createInfo.colorAttachmentViews.size() });
 
     for (size_t i = 0; i < cmdBuffers.size(); ++i) {
-        renderPassBeginInfo.framebuffer = createInfo.framebuffers[i];
-
         const auto& cmdBuffer = cmdBuffers[i];
         cmdBuffer.begin(cmdBufInfo);
-
-#if 0
-        if (vkx::debug::marker::active) {
-            vkx::debug::marker::beginRegion(cmdBuffer, "UI overlay", glm::vec4(1.0f, 0.94f, 0.3f, 1.0f));
-        }
-#endif
-
-        cmdBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
+        vks::debug::marker::beginRegion(cmdBuffer, "UI overlay", glm::vec4(1.0f, 0.94f, 0.3f, 1.0f));
+        colorAttachmentInfo.imageView = createInfo.colorAttachmentViews[i];
+        cmdBuffer.beginRendering(renderingInfo);
         cmdBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
         cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, descriptorSet, {});
         cmdBuffer.bindVertexBuffers(0, vertexBuffer.buffer, { 0 });
         cmdBuffer.bindIndexBuffer(indexBuffer.buffer, 0, vk::IndexType::eUint16);
         cmdBuffer.setViewport(0, viewport);
         cmdBuffer.setScissor(0, scissor);
-
         cmdBuffer.pushConstants(pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, vk::ArrayProxy<const PushConstBlock>{ pushConstBlock });
 
         // Render commands
@@ -341,23 +252,54 @@ void UIOverlay::updateCommandBuffers() {
             }
             vertexOffset += cmd_list->VtxBuffer.Size;
         }
-
-        // Add empty subpasses if requested
-        if (createInfo.subpassCount > 1) {
-            for (uint32_t j = 1; j < createInfo.subpassCount; j++) {
-                cmdBuffer.nextSubpass(vk::SubpassContents::eInline);
-            }
-        }
-
-        cmdBuffer.endRenderPass();
-#if 0 
-        if (vkx::debug::marker::active) {
-            vkx::debug::marker::endRegion(cmdBuffers[i]);
-        }
-#endif
-
+        cmdBuffer.endRendering();
+        vks::debug::marker::endRegion(cmdBuffer);
         cmdBuffer.end();
     }
+}
+
+template <typename T>
+void copyToBuffer(const ImVector<T>& v, vks::Buffer& buffer, vk::DeviceSize& offset) {
+    const vk::DeviceSize result = v.Size * sizeof(T);
+    buffer.copy(result, v.Data, offset);
+    offset += result;
+}
+
+void copyToBuffers(const ImVector<ImDrawList*>& cmdLists, vks::Buffer& vertexBuffer, vks::Buffer& indexBuffer) {
+    vk::DeviceSize vertexOffset = 0;
+    vk::DeviceSize indexOffset = 0;
+    for (int n = 0; n < cmdLists.Size; n++) {
+        const auto& cmdList = *cmdLists[n];
+        copyToBuffer(cmdList.VtxBuffer, vertexBuffer, vertexOffset);
+        copyToBuffer(cmdList.IdxBuffer, indexBuffer, indexOffset);
+    }
+}
+
+void allocate(vks::Buffer& buffer, vk::DeviceSize size, const vk::BufferUsageFlags& usageFlags) {
+    vk::DeviceSize oldSize = buffer.createInfo.size;
+    if (!buffer || oldSize < size) {
+        if (buffer) {
+            vks::Recycler::get().trash<vks::Buffer>(std::move(buffer));
+        }
+        buffer = {};
+        // Avoid frequent reallocation by doubling either the old size or the required size, whichever is larger
+        auto allocateSize = std::max(oldSize, size) * 2;
+        vks::Buffer::Builder builder{ allocateSize };
+        builder.withBufferUsage(usageFlags);
+        builder.withAllocPreferredFlags(vk::MemoryPropertyFlagBits::eHostCoherent);
+        builder.withAllocCreateFlags(VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
+        // Create the buffers with double the required size to reduce
+        auto& deviceInfo = vks::Context::get().deviceInfo;
+        buffer.create(builder);
+        //const auto& memoryTypes = deviceInfo.memoryProperties.core.memoryTypes;
+        //const auto& memoryType = memoryTypes[buffer.getMemoryType()];
+        //std::string memoryTypeStr = vk::to_string(memoryType.propertyFlags);
+    }
+}
+
+static boolean isCoherent(const vks::Buffer& buffer, const vk::PhysicalDeviceMemoryProperties& memoryProperties) {
+    const vk::MemoryType& memoryType = memoryProperties.memoryTypes[buffer.getMemoryType()];
+    return vk::MemoryPropertyFlagBits::eHostCoherent == (memoryType.propertyFlags & vk::MemoryPropertyFlagBits::eHostCoherent);
 }
 
 /** Update vertex and index buffer containing the imGui elements when required */
@@ -367,78 +309,55 @@ void UIOverlay::update() {
 
     if (!imDrawData) {
         return;
-    };
+    }
 
     // Note: Alignment is done inside buffer creation
     vk::DeviceSize vertexBufferSize = imDrawData->TotalVtxCount * sizeof(ImDrawVert);
     vk::DeviceSize indexBufferSize = imDrawData->TotalIdxCount * sizeof(ImDrawIdx);
-
-    // Update buffers only if vertex or index count has been changed compared to current buffer size
-
-    // Vertex buffer
-    if (!vertexBuffer || (vertexCount != imDrawData->TotalVtxCount)) {
-        vertexCount = imDrawData->TotalVtxCount;
-        if (vertexBuffer) {
-            vertexBuffer.unmap();
-            context.trash<vks::Buffer>(vertexBuffer);
-            vertexBuffer = vks::Buffer();
-        }
-		if (vertexCount) {
-			vertexBuffer = context.createBuffer(vk::BufferUsageFlagBits::eVertexBuffer, vk::MemoryPropertyFlagBits::eHostVisible, vertexBufferSize);
-			vertexBuffer.map();
-			updateCmdBuffers = true;
-		}
+    if (!vertexBufferSize || !indexBufferSize) {
+        return;
     }
 
-    // Index buffer
-    vk::DeviceSize indexSize = imDrawData->TotalIdxCount * sizeof(ImDrawIdx);
-    if (!indexBuffer || (indexCount < imDrawData->TotalIdxCount)) {
+    // Update buffers only if vertex or index count has been changed compared to current buffer size
+    // REALLOCATE buffers only if the old buffers were too small
+
+    // Vertex buffer
+    allocate(vertexBuffer, vertexBufferSize, vk::BufferUsageFlagBits::eVertexBuffer);
+    allocate(indexBuffer, indexBufferSize, vk::BufferUsageFlagBits::eIndexBuffer);
+
+    if (indexCount != imDrawData->TotalIdxCount || vertexCount != imDrawData->TotalVtxCount) {
         indexCount = imDrawData->TotalIdxCount;
-        if (indexBuffer) {
-            indexBuffer.unmap();
-            indexBuffer.destroy();
-        }
-		if (indexCount) {
-			indexBuffer = context.createBuffer(vk::BufferUsageFlagBits::eIndexBuffer, vk::MemoryPropertyFlagBits::eHostVisible, indexBufferSize);
-			indexBuffer.map();
-			updateCmdBuffers = true;
-		}
+        vertexCount = imDrawData->TotalVtxCount;
+        updateCmdBuffers = true;
     }
 
     // Upload data
-    auto vtxDst = (ImDrawVert*)vertexBuffer.mapped;
-    auto idxDst = (ImDrawIdx*)indexBuffer.mapped;
-
-    for (int n = 0; n < imDrawData->CmdListsCount; n++) {
-        const ImDrawList* cmd_list = imDrawData->CmdLists[n];
-        memcpy(vtxDst, cmd_list->VtxBuffer.Data, cmd_list->VtxBuffer.Size * sizeof(ImDrawVert));
-        memcpy(idxDst, cmd_list->IdxBuffer.Data, cmd_list->IdxBuffer.Size * sizeof(ImDrawIdx));
-        vtxDst += cmd_list->VtxBuffer.Size;
-        idxDst += cmd_list->IdxBuffer.Size;
-    }
+    copyToBuffers(imDrawData->CmdLists, vertexBuffer, indexBuffer);
 
     // Flush to make writes visible to GPU
-	if (vertexBuffer) {
-		vertexBuffer.flush();
+    static const auto memoryProperties = vks::Context::get().deviceInfo.memoryProperties.core;
+    if (!isCoherent(vertexBuffer, memoryProperties)) {
+        vertexBuffer.flush();
     }
-	if (indexBuffer) {
-		indexBuffer.flush();
-	}
+    if (!isCoherent(indexBuffer, memoryProperties)) {
+        indexBuffer.flush();
+    }
 
     if (updateCmdBuffers) {
         updateCommandBuffers();
     }
 }
 
-void UIOverlay::resize(const vk::Extent2D& size, const std::vector<vk::Framebuffer>& framebuffers) {
+void UIOverlay::resize(const vk::Extent2D& size, const std::vector<vk::ImageView>& views) {
     ImGuiIO& io = ImGui::GetIO();
     io.DisplaySize = ImVec2((float)(size.width), (float)(size.height));
     createInfo.size = size;
-    createInfo.framebuffers = framebuffers;
+    createInfo.colorAttachmentViews = views;
+    // createInfo.depthStencilView = depthStencilView;
     updateCommandBuffers();
 }
 
-/** Submit the overlay command buffers to a queue */
+/** Submit the overlay command buffers to a graphicsQueue */
 void UIOverlay::submit(const vk::Queue& queue, uint32_t bufferindex, vk::SubmitInfo submitInfo) const {
     if (!visible) {
         return;
@@ -448,8 +367,9 @@ void UIOverlay::submit(const vk::Queue& queue, uint32_t bufferindex, vk::SubmitI
     submitInfo.commandBufferCount = 1;
 
     queue.submit(submitInfo, fence);
-    context.device.waitForFences(fence, VK_TRUE, UINT64_MAX);
-    context.device.resetFences(fence);
+    // We get the result because the function specifies nodiscard, but since we've set the timeout to UINT64_MAX we shouldn't ever get a timeout result.
+    auto waitResult = device.waitForFences(fence, VK_TRUE, UINT64_MAX);
+    device.resetFences(fence);
 }
 
 bool UIOverlay::header(const char* caption) const {
@@ -502,3 +422,4 @@ void UIOverlay::text(const char* formatstr, ...) const {
     ImGui::TextV(formatstr, args);
     va_end(args);
 }
+#endif

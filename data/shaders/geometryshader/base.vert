@@ -8,11 +8,6 @@ layout (location = 1) in vec3 inNormal;
 
 layout (location = 0) out vec3 outNormal;
 
-out gl_PerVertex
-{
-	vec4 gl_Position;
-};
-
 void main(void)
 {
 	outNormal = inNormal;

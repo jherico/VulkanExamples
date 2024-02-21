@@ -1,115 +1,49 @@
 #include "pbr.hpp"
 
 #include <chrono>
+#include <cmath>
+#include <common/utils.hpp>
 #include <iostream>
-#include "vks/texture.hpp"
-#include "vks/context.hpp"
-#include "vks/pipelines.hpp"
-#include "utils.hpp"
+#include <rendering/context.hpp>
+#include <rendering/offscreen.hpp>
+#include <rendering/texture.hpp>
+#include <vks/pipelines.hpp>
+
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <shaders/pbr/filtercube.vert.inl>
+#include <shaders/pbr/genbrdflut.frag.inl>
+#include <shaders/pbr/genbrdflut.vert.inl>
+#include <shaders/pbr/irradiancecube.frag.inl>
+#include <shaders/pbr/prefilterenvmap.frag.inl>
+
+#ifndef M_PI
+constexpr float M_PI = 3.14159265359f;
+#endif
+
 // Generate a BRDF integration map used as a look-up-table (stores roughness / NdotV)
-void vkx::pbr::generateBRDFLUT(const vks::Context& context, vks::texture::Texture2D& target) {
+void vkx::pbr::generateBRDFLUT(vks::texture::Texture2D& target) {
+    constexpr vk::Format format = vk::Format::eR16G16Sfloat;  // R16G16 is supported pretty much everywhere
+    constexpr int32_t dim = 512;
+    constexpr vk::Extent2D extent{ dim, dim };
+
+    const auto& context = vks::Context::get();
+    const auto& device = context.device;
     auto tStart = std::chrono::high_resolution_clock::now();
 
-    const vk::Format format = vk::Format::eR16G16Sfloat;  // R16G16 is supported pretty much everywhere
-    const int32_t dim = 512;
-
-    const auto& device = context.device;
-    target.device = device;
-    target.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-
+    // Create the texture image and view
     {
-        // Image
-        vk::ImageCreateInfo imageCI;
-        imageCI.imageType = vk::ImageType::e2D;
-        imageCI.format = format;
-        imageCI.extent.width = dim;
-        imageCI.extent.height = dim;
-        imageCI.extent.depth = 1;
-        imageCI.mipLevels = 1;
-        imageCI.arrayLayers = 1;
-        imageCI.usage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled;
-        (vks::Image&)target = context.createImage(imageCI);
-        // Image view
-        vk::ImageViewCreateInfo viewCI;
-        viewCI.viewType = vk::ImageViewType::e2D;
-        viewCI.format = format;
-        viewCI.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-        viewCI.subresourceRange.levelCount = 1;
-        viewCI.subresourceRange.layerCount = 1;
-        viewCI.image = target.image;
-        target.view = context.device.createImageView(viewCI);
-        // Sampler
-        vk::SamplerCreateInfo samplerCI;
-        samplerCI.magFilter = vk::Filter::eLinear;
-        samplerCI.minFilter = vk::Filter::eLinear;
-        samplerCI.mipmapMode = vk::SamplerMipmapMode::eLinear;
-        samplerCI.addressModeU = vk::SamplerAddressMode::eClampToEdge;
-        samplerCI.addressModeV = vk::SamplerAddressMode::eClampToEdge;
-        samplerCI.addressModeW = vk::SamplerAddressMode::eClampToEdge;
-        samplerCI.maxLod = 1.0f;
-        samplerCI.borderColor = vk::BorderColor::eFloatOpaqueWhite;
-        target.sampler = device.createSampler(samplerCI);
-        target.updateDescriptor();
-    }
-
-    // FB, Att, RP, Pipe, etc.
-    vk::RenderPass renderpass;
-    {
-        vk::AttachmentDescription attDesc;
-        // Color attachment
-        attDesc.format = format;
-        attDesc.loadOp = vk::AttachmentLoadOp::eClear;
-        attDesc.storeOp = vk::AttachmentStoreOp::eStore;
-        attDesc.stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
-        attDesc.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
-        attDesc.initialLayout = vk::ImageLayout::eUndefined;
-        attDesc.finalLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-        vk::AttachmentReference colorReference{ 0, vk::ImageLayout::eColorAttachmentOptimal };
-
-        vk::SubpassDescription subpassDescription = {};
-        subpassDescription.pipelineBindPoint = vk::PipelineBindPoint::eGraphics;
-        subpassDescription.colorAttachmentCount = 1;
-        subpassDescription.pColorAttachments = &colorReference;
-
-        // Use subpass dependencies for layout transitions
-        std::array<vk::SubpassDependency, 2> dependencies{
-            vk::SubpassDependency{ VK_SUBPASS_EXTERNAL, 0, vk::PipelineStageFlagBits::eBottomOfPipe, vk::PipelineStageFlagBits::eColorAttachmentOutput,
-                                   vk::AccessFlagBits::eMemoryRead, vk::AccessFlagBits::eColorAttachmentRead | vk::AccessFlagBits::eColorAttachmentWrite,
-                                   vk::DependencyFlagBits::eByRegion },
-            vk::SubpassDependency{ 0, VK_SUBPASS_EXTERNAL, vk::PipelineStageFlagBits::eColorAttachmentOutput, vk::PipelineStageFlagBits::eBottomOfPipe,
-                                   vk::AccessFlagBits::eColorAttachmentRead | vk::AccessFlagBits::eColorAttachmentWrite, vk::AccessFlagBits::eMemoryRead,
-                                   vk::DependencyFlagBits::eByRegion },
-        };
-
-        // Create the actual renderpass
-        vk::RenderPassCreateInfo renderPassCI;
-        renderPassCI.attachmentCount = 1;
-        renderPassCI.pAttachments = &attDesc;
-        renderPassCI.subpassCount = 1;
-        renderPassCI.pSubpasses = &subpassDescription;
-        renderPassCI.dependencyCount = 2;
-        renderPassCI.pDependencies = dependencies.data();
-        renderpass = device.createRenderPass(renderPassCI);
-    }
-
-    vk::Framebuffer framebuffer;
-    {
-        vk::FramebufferCreateInfo framebufferCI;
-        framebufferCI.renderPass = renderpass;
-        framebufferCI.attachmentCount = 1;
-        framebufferCI.pAttachments = &target.view;
-        framebufferCI.width = dim;
-        framebufferCI.height = dim;
-        framebufferCI.layers = 1;
-        framebuffer = device.createFramebuffer(framebufferCI);
+        vks::Image::Builder builder{ dim };
+        builder.withFormat(format);
+        builder.withUsage(vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled);
+        target.build(builder);
+        vks::debug::marker::setObjectName(device, target.image.image, "BRDF LUT");
+        vks::debug::marker::setObjectName(device, target.imageView, "BRDF LUT");
     }
 
     // Desriptors
     vk::DescriptorSetLayout descriptorsetlayout = device.createDescriptorSetLayout({});
-
     // Descriptor Pool
     std::vector<vk::DescriptorPoolSize> poolSizes{ { vk::DescriptorType::eCombinedImageSampler, 1 } };
     vk::DescriptorPool descriptorpool = device.createDescriptorPool({ {}, 2, (uint32_t)poolSizes.size(), poolSizes.data() });
@@ -121,45 +55,46 @@ void vkx::pbr::generateBRDFLUT(const vks::Context& context, vks::texture::Textur
     vk::PipelineLayout pipelinelayout = device.createPipelineLayout({ {}, 1, &descriptorsetlayout });
 
     // Pipeline
-    vks::pipelines::GraphicsPipelineBuilder pipelineBuilder{ device, pipelinelayout, renderpass };
+    vks::pipelines::GraphicsPipelineBuilder pipelineBuilder{ device, pipelinelayout };
     pipelineBuilder.rasterizationState.cullMode = vk::CullModeFlagBits::eNone;
     pipelineBuilder.depthStencilState = { false };
     // Look-up-table (from BRDF) pipeline
-    pipelineBuilder.loadShader(vkx::getAssetPath() + "shaders/pbr/genbrdflut.vert.spv", vk::ShaderStageFlagBits::eVertex);
-    pipelineBuilder.loadShader(vkx::getAssetPath() + "shaders/pbr/genbrdflut.frag.spv", vk::ShaderStageFlagBits::eFragment);
+    pipelineBuilder.loadShader(vkx::shaders::pbr::genbrdflut::vert, vk::ShaderStageFlagBits::eVertex);
+    pipelineBuilder.loadShader(vkx::shaders::pbr::genbrdflut::frag, vk::ShaderStageFlagBits::eFragment);
     vk::Pipeline pipeline = pipelineBuilder.create(context.pipelineCache);
 
     // Render
-    vk::ClearValue clearValues[1];
-    clearValues[0].color = vks::util::clearColor({ 0.0f, 0.0f, 0.0f, 1.0f });
 
-    vk::RenderPassBeginInfo renderPassBeginInfo;
-    renderPassBeginInfo.renderPass = renderpass;
-    renderPassBeginInfo.renderArea.extent.width = dim;
-    renderPassBeginInfo.renderArea.extent.height = dim;
-    renderPassBeginInfo.clearValueCount = 1;
-    renderPassBeginInfo.pClearValues = clearValues;
-    renderPassBeginInfo.framebuffer = framebuffer;
+    vk::RenderingAttachmentInfo colorAttachmentInfo;
+    colorAttachmentInfo.imageLayout = vk::ImageLayout::eAttachmentOptimal;
+    colorAttachmentInfo.loadOp = vk::AttachmentLoadOp::eClear;
+    colorAttachmentInfo.storeOp = vk::AttachmentStoreOp::eStore;
+    colorAttachmentInfo.imageView = target.imageView;
+    colorAttachmentInfo.clearValue = vks::util::clearColor({ 0.0f, 0.0f, 0.0f, 1.0f });
 
-    context.withPrimaryCommandBuffer([&](const vk::CommandBuffer& cmdBuf) {
-        cmdBuf.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
-        vk::Viewport viewport{ 0, 0, (float)dim, (float)dim, 0, 1 };
-        vk::Rect2D scissor{ vk::Offset2D{}, vk::Extent2D{ (uint32_t)dim, (uint32_t)dim } };
-        cmdBuf.setViewport(0, viewport);
-        cmdBuf.setScissor(0, scissor);
+    vk::RenderingInfo renderingInfo;
+    renderingInfo.pColorAttachments = &colorAttachmentInfo;
+    renderingInfo.colorAttachmentCount = 1;
+    renderingInfo.layerCount = 1;
+    renderingInfo.renderArea.extent = extent;
+
+    vks::Loader::get().withPrimaryCommandBuffer([&](const vk::CommandBuffer& cmdBuf) {
+        using namespace vks::util;
+        setImageLayout(cmdBuf, target.image, ImageTransitionState::UNDEFINED, ImageTransitionState::COLOR_ATTACHMENT);
+        cmdBuf.beginRendering(renderingInfo);
+        cmdBuf.setViewport(0, vks::util::viewport(extent));
+        cmdBuf.setScissor(0, vks::util::rect2D(extent));
         cmdBuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
         cmdBuf.draw(3, 1, 0, 0);
-        cmdBuf.endRenderPass();
+        cmdBuf.endRendering();
+        setImageLayout(cmdBuf, target.image, ImageTransitionState::COLOR_ATTACHMENT, ImageTransitionState::SAMPLED);
     });
-    context.queue.waitIdle();
 
     // todo: cleanup
-    device.destroyPipeline(pipeline);
-    device.destroyPipelineLayout(pipelinelayout);
-    device.destroyRenderPass(renderpass);
-    device.destroyFramebuffer(framebuffer);
-    device.destroyDescriptorSetLayout(descriptorsetlayout);
-    device.destroyDescriptorPool(descriptorpool);
+    device.destroy(pipeline);
+    device.destroy(pipelinelayout);
+    device.destroy(descriptorsetlayout);
+    device.destroy(descriptorpool);
 
     auto tEnd = std::chrono::high_resolution_clock::now();
     auto tDiff = std::chrono::duration<double, std::milli>(tEnd - tStart).count();
@@ -167,144 +102,39 @@ void vkx::pbr::generateBRDFLUT(const vks::Context& context, vks::texture::Textur
 }
 
 // Generate an irradiance cube map from the environment cube map
-void vkx::pbr::generateIrradianceCube(const vks::Context& context,
-                                      vks::texture::Texture& target,
+void vkx::pbr::generateIrradianceCube(vks::texture::TextureCubeMap& target,
                                       const vks::model::Model& skybox,
                                       const vks::model::VertexLayout& vertexLayout,
                                       const vk::DescriptorImageInfo& skyboxDescriptor) {
     auto tStart = std::chrono::high_resolution_clock::now();
-
+    const auto& context = vks::Context::get();
     const auto& device = context.device;
-    target.device = device;
 
     const vk::Format format = vk::Format::eR32G32B32A32Sfloat;
     const int32_t dim = 64;
     const uint32_t numMips = static_cast<uint32_t>(floor(log2(dim))) + 1;
+    auto extent = vk::Extent2D{ dim, dim };
 
     {
-        // Pre-filtered cube map
-        // Image
-        vk::ImageCreateInfo imageCI;
-        imageCI.imageType = vk::ImageType::e2D;
-        imageCI.format = format;
-        imageCI.extent.width = dim;
-        imageCI.extent.height = dim;
-        imageCI.extent.depth = 1;
-        imageCI.mipLevels = numMips;
-        imageCI.arrayLayers = 6;
-        imageCI.usage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst;
-        imageCI.flags = vk::ImageCreateFlagBits::eCubeCompatible;
-
-        target = context.createImage(imageCI);
-
-        // Image view
-        vk::ImageViewCreateInfo viewCI;
-        viewCI.viewType = vk::ImageViewType::eCube;
-        viewCI.format = format;
-        viewCI.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-        viewCI.subresourceRange.levelCount = numMips;
-        viewCI.subresourceRange.layerCount = 6;
-        viewCI.image = target.image;
-        target.view = device.createImageView(viewCI);
-        // Sampler
-        vk::SamplerCreateInfo samplerCI;
-        samplerCI.magFilter = vk::Filter::eLinear;
-        samplerCI.minFilter = vk::Filter::eLinear;
-        samplerCI.mipmapMode = vk::SamplerMipmapMode::eLinear;
-        samplerCI.addressModeU = vk::SamplerAddressMode::eClampToEdge;
-        samplerCI.addressModeV = vk::SamplerAddressMode::eClampToEdge;
-        samplerCI.addressModeW = vk::SamplerAddressMode::eClampToEdge;
-        samplerCI.maxLod = static_cast<float>(numMips);
-        samplerCI.borderColor = vk::BorderColor::eFloatOpaqueWhite;
-        target.sampler = device.createSampler(samplerCI);
-        target.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-        target.updateDescriptor();
-    }
-
-    vk::RenderPass renderpass;
-    {
-        // FB, Att, RP, Pipe, etc.
-        vk::AttachmentDescription attDesc = {};
-        // Color attachment
-        attDesc.format = format;
-        attDesc.loadOp = vk::AttachmentLoadOp::eClear;
-        attDesc.storeOp = vk::AttachmentStoreOp::eStore;
-        attDesc.stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
-        attDesc.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
-        attDesc.initialLayout = vk::ImageLayout::eUndefined;
-        attDesc.finalLayout = vk::ImageLayout::eColorAttachmentOptimal;
-        vk::AttachmentReference colorReference{ 0, vk::ImageLayout::eColorAttachmentOptimal };
-        vk::SubpassDescription subpassDescription{ {}, vk::PipelineBindPoint::eGraphics, 0, nullptr, 1, &colorReference };
-
-        // Use subpass dependencies for layout transitions
-        std::array<vk::SubpassDependency, 2> dependencies{
-            vk::SubpassDependency{ VK_SUBPASS_EXTERNAL, 0, vk::PipelineStageFlagBits::eBottomOfPipe, vk::PipelineStageFlagBits::eColorAttachmentOutput,
-                                   vk::AccessFlagBits::eMemoryRead, vk::AccessFlagBits::eColorAttachmentRead | vk::AccessFlagBits::eColorAttachmentWrite,
-                                   vk::DependencyFlagBits::eByRegion },
-            vk::SubpassDependency{ 0, VK_SUBPASS_EXTERNAL, vk::PipelineStageFlagBits::eColorAttachmentOutput, vk::PipelineStageFlagBits::eBottomOfPipe,
-                                   vk::AccessFlagBits::eColorAttachmentRead | vk::AccessFlagBits::eColorAttachmentWrite, vk::AccessFlagBits::eMemoryRead,
-                                   vk::DependencyFlagBits::eByRegion },
-        };
-
-        // Renderpass
-        vk::RenderPassCreateInfo renderPassCI;
-        renderPassCI.attachmentCount = 1;
-        renderPassCI.pAttachments = &attDesc;
-        renderPassCI.subpassCount = 1;
-        renderPassCI.pSubpasses = &subpassDescription;
-        renderPassCI.dependencyCount = 2;
-        renderPassCI.pDependencies = dependencies.data();
-
-        renderpass = device.createRenderPass(renderPassCI);
-    }
-
-    struct {
-        vks::Image image;
-        vk::Framebuffer framebuffer;
-    } offscreen;
-
-    // Offfscreen framebuffer
-    {
-        // Color attachment
-        vk::ImageCreateInfo imageCreateInfo;
-        imageCreateInfo.imageType = vk::ImageType::e2D;
-        imageCreateInfo.format = format;
-        imageCreateInfo.extent.width = dim;
-        imageCreateInfo.extent.height = dim;
-        imageCreateInfo.extent.depth = 1;
-        imageCreateInfo.mipLevels = 1;
-        imageCreateInfo.arrayLayers = 1;
-        imageCreateInfo.usage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc;
-        offscreen.image = context.createImage(imageCreateInfo);
-
-        vk::ImageViewCreateInfo colorImageView;
-        colorImageView.viewType = vk::ImageViewType::e2D;
-        colorImageView.format = format;
-        colorImageView.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-        colorImageView.subresourceRange.levelCount = 1;
-        colorImageView.subresourceRange.layerCount = 1;
-        colorImageView.image = offscreen.image.image;
-        offscreen.image.view = device.createImageView(colorImageView);
-
-        vk::FramebufferCreateInfo fbufCreateInfo;
-        fbufCreateInfo.renderPass = renderpass;
-        fbufCreateInfo.attachmentCount = 1;
-        fbufCreateInfo.pAttachments = &offscreen.image.view;
-        fbufCreateInfo.width = dim;
-        fbufCreateInfo.height = dim;
-        fbufCreateInfo.layers = 1;
-        offscreen.framebuffer = device.createFramebuffer(fbufCreateInfo);
-        context.setImageLayout(offscreen.image.image, vk::ImageAspectFlagBits::eColor, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
+        vks::Image::Builder builder{ dim };
+        builder.withFormat(format);
+        builder.withFlags(vk::ImageCreateFlagBits::eCubeCompatible);
+        builder.withArrayLayers(6);
+        builder.withMipLevels(numMips);
+        builder.withUsage(vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled);
+        target.build(builder, vk::ImageViewType::eCube);
+        vks::debug::marker::setObjectName(device, target.image.image, "Irradiance Cubemap");
+        vks::debug::marker::setObjectName(device, target.imageView, "Irradiance Cubemap");
     }
 
     // Descriptors
-    vk::DescriptorSetLayout descriptorsetlayout;
     vk::DescriptorSetLayoutBinding setLayoutBinding{ 0, vk::DescriptorType::eCombinedImageSampler, 1, vk::ShaderStageFlagBits::eFragment };
-    descriptorsetlayout = device.createDescriptorSetLayout({ {}, 1, &setLayoutBinding });
+    vk::DescriptorSetLayout descriptorsetlayout = device.createDescriptorSetLayout({ {}, 1, &setLayoutBinding });
 
     // Descriptor Pool
     vk::DescriptorPoolSize poolSize{ vk::DescriptorType::eCombinedImageSampler, 1 };
     vk::DescriptorPool descriptorpool = device.createDescriptorPool({ {}, 2, 1, &poolSize });
+
     // Descriptor sets
     vk::DescriptorSet descriptorset = device.allocateDescriptorSets({ descriptorpool, 1, &descriptorsetlayout })[0];
     vk::WriteDescriptorSet writeDescriptorSet{ descriptorset, 0, 0, 1, vk::DescriptorType::eCombinedImageSampler, &skyboxDescriptor };
@@ -322,7 +152,8 @@ void vkx::pbr::generateIrradianceCube(const vks::Context& context,
     vk::PipelineLayout pipelinelayout = device.createPipelineLayout(vk::PipelineLayoutCreateInfo{ {}, 1, &descriptorsetlayout, 1, &pushConstantRange });
 
     // Pipeline
-    vks::pipelines::GraphicsPipelineBuilder pipelineBuilder{ device, pipelinelayout, renderpass };
+    vks::pipelines::GraphicsPipelineBuilder pipelineBuilder{ device, pipelinelayout };
+    pipelineBuilder.dynamicRendering(vk::Format::eR32G32B32A32Sfloat);
     pipelineBuilder.rasterizationState.cullMode = vk::CullModeFlagBits::eNone;
     pipelineBuilder.depthStencilState = { false };
     pipelineBuilder.vertexInputState.bindingDescriptions = {
@@ -332,16 +163,9 @@ void vkx::pbr::generateIrradianceCube(const vks::Context& context,
         { 0, 0, vk::Format::eR32G32B32Sfloat, 0 },
     };
 
-    pipelineBuilder.loadShader(vkx::getAssetPath() + "shaders/pbr/filtercube.vert.spv", vk::ShaderStageFlagBits::eVertex);
-    pipelineBuilder.loadShader(vkx::getAssetPath() + "shaders/pbr/irradiancecube.frag.spv", vk::ShaderStageFlagBits::eFragment);
+    pipelineBuilder.loadShader(vkx::shaders::pbr::filtercube::vert, vk::ShaderStageFlagBits::eVertex);
+    pipelineBuilder.loadShader(vkx::shaders::pbr::irradiancecube::frag, vk::ShaderStageFlagBits::eFragment);
     vk::Pipeline pipeline = pipelineBuilder.create(context.pipelineCache);
-
-    // Render
-    vk::ClearValue clearValues[1];
-    clearValues[0].color = vks::util::clearColor({ 0.0f, 0.0f, 0.2f, 0.0f });
-
-    vk::RenderPassBeginInfo renderPassBeginInfo{ renderpass, offscreen.framebuffer, vk::Rect2D{ vk::Offset2D{}, vk::Extent2D{ (uint32_t)dim, (uint32_t)dim } },
-                                                 1, clearValues };
 
     const std::vector<glm::mat4> matrices = {
         // POSITIVE_X
@@ -358,7 +182,16 @@ void vkx::pbr::generateIrradianceCube(const vks::Context& context,
         glm::rotate(glm::mat4(1.0f), glm::radians(180.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
     };
 
-    context.withPrimaryCommandBuffer([&](const vk::CommandBuffer& cmdBuf) {
+    const auto& loader = vks::Loader::get();
+    // Offfscreen framebuffer
+    vkx::offscreen::Renderer offscreen;
+    {
+        vkx::offscreen::Builder builder{ { dim, dim } };
+        builder.appendColorFormat(format, vk::ImageUsageFlagBits::eTransferSrc);
+        offscreen.prepare(builder);
+    }
+
+    loader.withPrimaryCommandBuffer([&](const vk::CommandBuffer& cmdBuf) {
         vk::Viewport viewport{ 0, 0, (float)dim, (float)dim, 0.0f, 1.0f };
         vk::Rect2D scissor{ vk::Offset2D{}, vk::Extent2D{ (uint32_t)dim, (uint32_t)dim } };
 
@@ -369,36 +202,34 @@ void vkx::pbr::generateIrradianceCube(const vks::Context& context,
         subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
         subresourceRange.levelCount = numMips;
         subresourceRange.layerCount = 6;
+        using namespace vks::util;
 
         // Change image layout for all cubemap faces to transfer destination
-        context.setImageLayout(cmdBuf, target.image, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal, subresourceRange);
+        setImageLayout(cmdBuf, target.image, ImageTransitionState::UNDEFINED, ImageTransitionState::TRANSFER_DST);
 
         for (uint32_t m = 0; m < numMips; m++) {
             for (uint32_t f = 0; f < 6; f++) {
+                offscreen.setLayout(cmdBuf, ImageTransitionState::COLOR_ATTACHMENT);
                 viewport.width = static_cast<float>(dim * std::pow(0.5f, m));
                 viewport.height = static_cast<float>(dim * std::pow(0.5f, m));
                 cmdBuf.setViewport(0, 1, &viewport);
                 // Render scene from cube face's point of view
-                cmdBuf.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
-
+                cmdBuf.beginRendering(offscreen.renderingInfo);
                 // Update shader push constant block
-                pushBlock.mvp = glm::perspective((float)(M_PI / 2.0), 1.0f, 0.1f, 512.0f) * matrices[f];
-
+                float fovy = (float)(M_PI / 2.0);
+                float aspect = 1.0f;
+                float nearClip = 0.1f;
+                float farClip = 512.0f;
+                auto perspective = glm::perspective(fovy, aspect, nearClip, farClip);
+                pushBlock.mvp = perspective * matrices[f];
                 cmdBuf.pushConstants<PushBlock>(pipelinelayout, vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 0, pushBlock);
-
                 cmdBuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
                 cmdBuf.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelinelayout, 0, descriptorset, nullptr);
-
-                std::vector<vk::DeviceSize> offsets{ 0 };
-
-                cmdBuf.bindVertexBuffers(0, skybox.vertices.buffer, offsets);
+                cmdBuf.bindVertexBuffers(0, skybox.vertices.buffer, { 0 });
                 cmdBuf.bindIndexBuffer(skybox.indices.buffer, 0, vk::IndexType::eUint32);
                 cmdBuf.drawIndexed(skybox.indexCount, 1, 0, 0, 0);
-
-                cmdBuf.endRenderPass();
-
-                context.setImageLayout(cmdBuf, offscreen.image.image, vk::ImageAspectFlagBits::eColor, vk::ImageLayout::eColorAttachmentOptimal,
-                                       vk::ImageLayout::eTransferSrcOptimal);
+                cmdBuf.endRendering();
+                offscreen.setLayout(cmdBuf, ImageTransitionState::TRANSFER_SRC);
 
                 // Copy region for transfer from framebuffer to cube face
                 vk::ImageCopy copyRegion;
@@ -416,24 +247,21 @@ void vkx::pbr::generateIrradianceCube(const vks::Context& context,
                 copyRegion.extent.height = static_cast<uint32_t>(viewport.height);
                 copyRegion.extent.depth = 1;
 
-                cmdBuf.copyImage(offscreen.image.image, vk::ImageLayout::eTransferSrcOptimal, target.image, vk::ImageLayout::eTransferDstOptimal, copyRegion);
-
-                // Transform framebuffer color attachment back
-                context.setImageLayout(cmdBuf, offscreen.image.image, vk::ImageAspectFlagBits::eColor, vk::ImageLayout::eTransferSrcOptimal,
-                                       vk::ImageLayout::eColorAttachmentOptimal);
+                cmdBuf.copyImage(                                                                 //
+                    offscreen.colorTargets[0].image.image, vk::ImageLayout::eTransferSrcOptimal,  //
+                    target.image.image, vk::ImageLayout::eTransferDstOptimal,                     //
+                    copyRegion);
             }
         }
-        context.setImageLayout(cmdBuf, target.image, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal, subresourceRange);
+        setImageLayout(cmdBuf, target.image, ImageTransitionState::TRANSFER_DST, ImageTransitionState::SAMPLED);
     });
 
     // todo: cleanup
-    device.destroyRenderPass(renderpass, nullptr);
-    device.destroyFramebuffer(offscreen.framebuffer, nullptr);
-    offscreen.image.destroy();
-    device.destroyDescriptorPool(descriptorpool, nullptr);
-    device.destroyDescriptorSetLayout(descriptorsetlayout, nullptr);
-    device.destroyPipeline(pipeline, nullptr);
-    device.destroyPipelineLayout(pipelinelayout, nullptr);
+    offscreen.destroy();
+    device.destroy(descriptorpool);
+    device.destroy(descriptorsetlayout);
+    device.destroy(pipeline);
+    device.destroy(pipelinelayout);
 
     auto tEnd = std::chrono::high_resolution_clock::now();
     auto tDiff = std::chrono::duration<double, std::milli>(tEnd - tStart).count();
@@ -442,129 +270,30 @@ void vkx::pbr::generateIrradianceCube(const vks::Context& context,
 
 // Prefilter environment cubemap
 // See https://placeholderart.wordpress.com/2015/07/28/implementation-notes-runtime-environment-map-filtering-for-image-based-lighting/
-void vkx::pbr::generatePrefilteredCube(const vks::Context& context,
-                                       vks::texture::Texture& target,
+void vkx::pbr::generatePrefilteredCube(vks::texture::TextureCubeMap& target,
                                        const vks::model::Model& skybox,
                                        const vks::model::VertexLayout& vertexLayout,
                                        const vk::DescriptorImageInfo& skyboxDescriptor) {
     auto tStart = std::chrono::high_resolution_clock::now();
 
+    const auto& context = vks::Context::get();
     const auto& device = context.device;
-    target.device = device;
-    target.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
 
     const vk::Format format = vk::Format::eR16G16B16A16Sfloat;
     const int32_t dim = 512;
     const uint32_t numMips = static_cast<uint32_t>(floor(log2(dim))) + 1;
 
     // Pre-filtered cube map
-    // Image
     {
-        vk::ImageCreateInfo imageCI;
-        imageCI.imageType = vk::ImageType::e2D;
-        imageCI.format = format;
-        imageCI.extent.width = dim;
-        imageCI.extent.height = dim;
-        imageCI.extent.depth = 1;
-        imageCI.mipLevels = numMips;
-        imageCI.arrayLayers = 6;
-        imageCI.usage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst;
-        imageCI.flags = vk::ImageCreateFlagBits::eCubeCompatible;
-        target = context.createImage(imageCI);
-        // Image view
-        vk::ImageViewCreateInfo viewCI;
-        viewCI.viewType = vk::ImageViewType::eCube;
-        viewCI.format = format;
-        viewCI.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-        viewCI.subresourceRange.levelCount = numMips;
-        viewCI.subresourceRange.layerCount = 6;
-        viewCI.image = target.image;
-        target.view = device.createImageView(viewCI);
-        // Sampler
-        vk::SamplerCreateInfo samplerCI;
-        samplerCI.magFilter = vk::Filter::eLinear;
-        samplerCI.minFilter = vk::Filter::eLinear;
-        samplerCI.mipmapMode = vk::SamplerMipmapMode::eLinear;
-        samplerCI.addressModeU = vk::SamplerAddressMode::eClampToEdge;
-        samplerCI.addressModeV = vk::SamplerAddressMode::eClampToEdge;
-        samplerCI.addressModeW = vk::SamplerAddressMode::eClampToEdge;
-        samplerCI.maxLod = static_cast<float>(numMips);
-        samplerCI.borderColor = vk::BorderColor::eFloatOpaqueWhite;
-        target.sampler = device.createSampler(samplerCI);
-        target.descriptor.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-        target.updateDescriptor();
-    }
-
-    vk::RenderPass renderpass;
-    {
-        // FB, Att, RP, Pipe, etc.
-        vk::AttachmentDescription attDesc = {};
-        // Color attachment
-        attDesc.format = format;
-        attDesc.loadOp = vk::AttachmentLoadOp::eClear;
-        attDesc.storeOp = vk::AttachmentStoreOp::eStore;
-        attDesc.stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
-        attDesc.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
-        attDesc.initialLayout = vk::ImageLayout::eUndefined;
-        attDesc.finalLayout = vk::ImageLayout::eColorAttachmentOptimal;
-        vk::AttachmentReference colorReference{ 0, vk::ImageLayout::eColorAttachmentOptimal };
-
-        vk::SubpassDescription subpassDescription = {};
-        subpassDescription.pipelineBindPoint = vk::PipelineBindPoint::eGraphics;
-        subpassDescription.colorAttachmentCount = 1;
-        subpassDescription.pColorAttachments = &colorReference;
-
-        // Use subpass dependencies for layout transitions
-        std::array<vk::SubpassDependency, 2> dependencies{
-            vk::SubpassDependency{ VK_SUBPASS_EXTERNAL, 0, vk::PipelineStageFlagBits::eBottomOfPipe, vk::PipelineStageFlagBits::eColorAttachmentOutput,
-                                   vk::AccessFlagBits::eMemoryRead, vk::AccessFlagBits::eColorAttachmentRead | vk::AccessFlagBits::eColorAttachmentWrite,
-                                   vk::DependencyFlagBits::eByRegion },
-            vk::SubpassDependency{ 0, VK_SUBPASS_EXTERNAL, vk::PipelineStageFlagBits::eColorAttachmentOutput, vk::PipelineStageFlagBits::eBottomOfPipe,
-                                   vk::AccessFlagBits::eColorAttachmentRead | vk::AccessFlagBits::eColorAttachmentWrite, vk::AccessFlagBits::eMemoryRead,
-                                   vk::DependencyFlagBits::eByRegion },
-        };
-
-        // Renderpass
-        renderpass = device.createRenderPass({ {}, 1, &attDesc, 1, &subpassDescription, (uint32_t)dependencies.size(), dependencies.data() });
-    }
-
-    struct {
-        vks::Image image;
-        vk::Framebuffer framebuffer;
-    } offscreen;
-
-    // Offfscreen framebuffer
-    {
-        // Color attachment
-        vk::ImageCreateInfo imageCreateInfo;
-        imageCreateInfo.imageType = vk::ImageType::e2D;
-        imageCreateInfo.format = format;
-        imageCreateInfo.extent.width = dim;
-        imageCreateInfo.extent.height = dim;
-        imageCreateInfo.extent.depth = 1;
-        imageCreateInfo.mipLevels = 1;
-        imageCreateInfo.arrayLayers = 1;
-        imageCreateInfo.usage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc;
-        offscreen.image = context.createImage(imageCreateInfo);
-
-        vk::ImageViewCreateInfo colorImageView;
-        colorImageView.viewType = vk::ImageViewType::e2D;
-        colorImageView.format = format;
-        colorImageView.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-        colorImageView.subresourceRange.levelCount = 1;
-        colorImageView.subresourceRange.layerCount = 1;
-        colorImageView.image = offscreen.image.image;
-        offscreen.image.view = device.createImageView(colorImageView);
-
-        vk::FramebufferCreateInfo fbufCreateInfo;
-        fbufCreateInfo.renderPass = renderpass;
-        fbufCreateInfo.attachmentCount = 1;
-        fbufCreateInfo.pAttachments = &offscreen.image.view;
-        fbufCreateInfo.width = dim;
-        fbufCreateInfo.height = dim;
-        fbufCreateInfo.layers = 1;
-        offscreen.framebuffer = device.createFramebuffer(fbufCreateInfo);
-        context.setImageLayout(offscreen.image.image, vk::ImageAspectFlagBits::eColor, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal);
+        vks::Image::Builder builder{ dim };
+        builder.withFormat(format);
+        builder.withFlags(vk::ImageCreateFlagBits::eCubeCompatible);
+        builder.withArrayLayers(6);
+        builder.withMipLevels(numMips);
+        builder.withUsage(vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled);
+        target.build(builder, vk::ImageViewType::eCube);
+        vks::debug::marker::setObjectName(device, target.image.image, "Prefiltered Cubemap");
+        vks::debug::marker::setObjectName(device, target.imageView, "Prefiltered Cubemap");
     }
 
     // Descriptors
@@ -589,7 +318,8 @@ void vkx::pbr::generatePrefilteredCube(const vks::Context& context,
     vk::PipelineLayout pipelinelayout = device.createPipelineLayout({ {}, 1, &descriptorsetlayout, 1, &pushConstantRange });
 
     // Pipeline
-    vks::pipelines::GraphicsPipelineBuilder pipelineBuilder{ device, pipelinelayout, renderpass };
+    vks::pipelines::GraphicsPipelineBuilder pipelineBuilder{ device, pipelinelayout };
+    pipelineBuilder.dynamicRendering(format);
     pipelineBuilder.rasterizationState.cullMode = vk::CullModeFlagBits::eNone;
     pipelineBuilder.depthStencilState = { false };
     pipelineBuilder.vertexInputState.bindingDescriptions = {
@@ -599,22 +329,11 @@ void vkx::pbr::generatePrefilteredCube(const vks::Context& context,
         { 0, 0, vk::Format::eR32G32B32Sfloat, 0 },
     };
 
-    pipelineBuilder.loadShader(vkx::getAssetPath() + "shaders/pbr/filtercube.vert.spv", vk::ShaderStageFlagBits::eVertex);
-    pipelineBuilder.loadShader(vkx::getAssetPath() + "shaders/pbr/prefilterenvmap.frag.spv", vk::ShaderStageFlagBits::eFragment);
+    pipelineBuilder.loadShader(vkx::shaders::pbr::filtercube::vert, vk::ShaderStageFlagBits::eVertex);
+    pipelineBuilder.loadShader(vkx::shaders::pbr::prefilterenvmap::frag, vk::ShaderStageFlagBits::eFragment);
     vk::Pipeline pipeline = pipelineBuilder.create(context.pipelineCache);
 
-    // Render
-
-    vk::ClearValue clearValues[1];
-    clearValues[0].color = vks::util::clearColor({ 0.0f, 0.0f, 0.2f, 0.0f });
-
-    vk::RenderPassBeginInfo renderPassBeginInfo{ renderpass,
-                                                 offscreen.framebuffer,
-                                                 { vk::Offset2D{}, vk::Extent2D{ (uint32_t)dim, (uint32_t)dim } },
-                                                 1,
-                                                 clearValues };
     // Reuse render pass from example pass
-
     const std::vector<glm::mat4> matrices = {
         // POSITIVE_X
         glm::rotate(glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 0.0f)), glm::radians(180.0f), glm::vec3(1.0f, 0.0f, 0.0f)),
@@ -630,24 +349,36 @@ void vkx::pbr::generatePrefilteredCube(const vks::Context& context,
         glm::rotate(glm::mat4(1.0f), glm::radians(180.0f), glm::vec3(0.0f, 0.0f, 1.0f)),
     };
 
-    context.withPrimaryCommandBuffer([&](const vk::CommandBuffer& cmdBuf) {
+    const auto& loader = vks::Loader::get();
+
+    // Offfscreen framebuffer
+    vkx::offscreen::Renderer offscreen;
+    {
+        vkx::offscreen::Builder builder{ { dim, dim } };
+        builder.appendColorFormat(format, vk::ImageUsageFlagBits::eTransferSrc, vk::ClearColorValue{ 0.0f, 0.0f, 0.2f, 0.0f });
+        offscreen.prepare(builder);
+    }
+
+    loader.withPrimaryCommandBuffer([&](const vk::CommandBuffer& cmdBuf) {
         vk::Viewport viewport{ 0, 0, (float)dim, (float)dim, 0, 1 };
         vk::Rect2D scissor{ vk::Offset2D{}, vk::Extent2D{ (uint32_t)dim, (uint32_t)dim } };
         cmdBuf.setViewport(0, viewport);
         cmdBuf.setScissor(0, scissor);
         vk::ImageSubresourceRange subresourceRange{ vk::ImageAspectFlagBits::eColor, 0, numMips, 0, 6 };
         // Change image layout for all cubemap faces to transfer destination
-        context.setImageLayout(cmdBuf, target.image, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal, subresourceRange);
-
+        using namespace vks::util;
+        auto& offscreenImage = offscreen.colorTargets[0].image.image;
+        auto& outputImage = target.image.image;
+        setImageLayout(cmdBuf, target.image, ImageTransitionState::UNDEFINED, ImageTransitionState::TRANSFER_DST);
         for (uint32_t m = 0; m < numMips; m++) {
             pushBlock.roughness = (float)m / (float)(numMips - 1);
             for (uint32_t f = 0; f < 6; f++) {
                 viewport.width = static_cast<float>(dim * std::pow(0.5f, m));
                 viewport.height = static_cast<float>(dim * std::pow(0.5f, m));
                 cmdBuf.setViewport(0, viewport);
-
+                offscreen.setLayout(cmdBuf, ImageTransitionState::COLOR_ATTACHMENT);
                 // Render scene from cube face's point of view
-                cmdBuf.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
+                cmdBuf.beginRendering(offscreen.renderingInfo);
 
                 // Update shader push constant block
                 pushBlock.mvp = glm::perspective((float)(M_PI / 2.0), 1.0f, 0.1f, 512.0f) * matrices[f];
@@ -661,10 +392,8 @@ void vkx::pbr::generatePrefilteredCube(const vks::Context& context,
                 cmdBuf.bindIndexBuffer(skybox.indices.buffer, 0, vk::IndexType::eUint32);
                 cmdBuf.drawIndexed(skybox.indexCount, 1, 0, 0, 0);
 
-                cmdBuf.endRenderPass();
-
-                context.setImageLayout(cmdBuf, offscreen.image.image, vk::ImageAspectFlagBits::eColor, vk::ImageLayout::eColorAttachmentOptimal,
-                                       vk::ImageLayout::eTransferSrcOptimal);
+                cmdBuf.endRendering();
+                offscreen.setLayout(cmdBuf, ImageTransitionState::TRANSFER_SRC);
 
                 // Copy region for transfer from framebuffer to cube face
                 vk::ImageCopy copyRegion;
@@ -683,24 +412,16 @@ void vkx::pbr::generatePrefilteredCube(const vks::Context& context,
                 copyRegion.extent.width = static_cast<uint32_t>(viewport.width);
                 copyRegion.extent.height = static_cast<uint32_t>(viewport.height);
                 copyRegion.extent.depth = 1;
-
-                cmdBuf.copyImage(offscreen.image.image, vk::ImageLayout::eTransferSrcOptimal, target.image, vk::ImageLayout::eTransferDstOptimal, copyRegion);
-                // Transform framebuffer color attachment back
-                context.setImageLayout(cmdBuf, offscreen.image.image, vk::ImageAspectFlagBits::eColor, vk::ImageLayout::eTransferSrcOptimal,
-                                       vk::ImageLayout::eColorAttachmentOptimal);
+                cmdBuf.copyImage(offscreenImage, vk::ImageLayout::eTransferSrcOptimal, outputImage, vk::ImageLayout::eTransferDstOptimal, copyRegion);
             }
         }
-        context.setImageLayout(cmdBuf, target.image, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal, subresourceRange);
+        setImageLayout(cmdBuf, target.image, ImageTransitionState::TRANSFER_DST, ImageTransitionState::SAMPLED);
     });
-
-    // todo: cleanup
-    device.destroyRenderPass(renderpass, nullptr);
-    device.destroyFramebuffer(offscreen.framebuffer, nullptr);
-    offscreen.image.destroy();
-    device.destroyDescriptorPool(descriptorpool, nullptr);
-    device.destroyDescriptorSetLayout(descriptorsetlayout, nullptr);
-    device.destroyPipeline(pipeline, nullptr);
-    device.destroyPipelineLayout(pipelinelayout, nullptr);
+    offscreen.destroy();
+    device.destroy(descriptorpool, nullptr);
+    device.destroy(descriptorsetlayout, nullptr);
+    device.destroy(pipeline, nullptr);
+    device.destroy(pipelinelayout, nullptr);
 
     auto tEnd = std::chrono::high_resolution_clock::now();
     auto tDiff = std::chrono::duration<double, std::milli>(tEnd - tStart).count();

@@ -9,9 +9,9 @@
 */
 
 #pragma once
-
 #include <glm/glm.hpp>
-#include "vks/context.hpp"
+#include <rendering/context.hpp>
+#include <vks/buffer.hpp>
 
 struct Vertex {
     float pos[3];
@@ -33,6 +33,9 @@ struct Vertex {
 
 class VulkanGear {
 private:
+    const vks::Context& context{ vks::Context::get() };
+    const vk::Device device{ context.device };
+
     struct UBO {
         glm::mat4 projection;
         glm::mat4 model;
@@ -41,7 +44,6 @@ private:
         glm::vec3 lightPos;
     };
 
-    vk::Device device;
     glm::vec3 color;
     glm::vec3 pos;
     float rotSpeed;
@@ -61,8 +63,8 @@ private:
     UBO ubo;
     vks::Buffer uniformData;
 
-    int32_t newVertex(std::vector<Vertex>* vBuffer, float x, float y, float z, const glm::vec3& normal);
-    void newFace(std::vector<uint32_t>* iBuffer, int a, int b, int c);
+    int32_t newVertex(std::vector<Vertex>& vBuffer, const glm::vec3& pos, const glm::vec3& normal);
+    void newFace(std::vector<uint32_t>& iBuffer, const glm::uvec3& face);
 
 public:
     vk::DescriptorSet descriptorSet;
@@ -71,11 +73,12 @@ public:
     void updateUniformBuffer(const glm::mat4& perspective, const glm::mat4& view, float timer);
 
     void setupDescriptorSet(vk::DescriptorPool pool, vk::DescriptorSetLayout descriptorSetLayout);
-
+    VulkanGear() = default;
+    VulkanGear(VulkanGear&&) = default;
+    VulkanGear(const VulkanGear&) = delete;
     ~VulkanGear();
 
-    void generate(const vks::Context& context,
-                  float inner_radius,
+    void generate(float inner_radius,
                   float outer_radius,
                   float width,
                   int teeth,

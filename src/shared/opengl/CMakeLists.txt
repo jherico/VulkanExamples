@@ -5,4 +5,5 @@ file(GLOB_RECURSE COMMON_SOURCE *.c *.cpp *.h *.hpp)
 add_library(${TARGET_NAME} STATIC ${COMMON_SOURCE})
 set_target_properties(${TARGET_NAME} PROPERTIES FOLDER "shared")
 
-target_glad()
+target_link_libraries(${TARGET_NAME} PUBLIC glad)
+target_include_directories(${TARGET_NAME} PUBLIC ${PROJECT_SOURCE_DIR/ThirdParty/glad/include})

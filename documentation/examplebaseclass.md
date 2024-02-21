@@ -4,7 +4,7 @@ All examples are derived from a base class that encapsulates common used Vulkan 
 If you want to create an example based on this base class, simply derive :
 
 ```cpp
-#include "vulkanexamplebase.h"
+#include <examples/example.hpp>
 ...
 class MyVulkanExample : public VulkanExampleBase
 {

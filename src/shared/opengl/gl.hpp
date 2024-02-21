@@ -1,4 +1,6 @@
-#include "common.hpp"
+//#include <shared/common.hpp>
+
+#include <string>
 
 #if !defined(__ANDROID__)
 #include <glad/glad.h>

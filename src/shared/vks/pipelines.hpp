@@ -1,11 +1,16 @@
 #pragma once
 
-#include "context.hpp"
-#include "model.hpp"
-#include "shaders.hpp"
+// #include <vks/context.hpp>
+#include <vulkan/vulkan.hpp>
+#include <vks/helpers.hpp>
+#include <rendering/shaders.hpp>
+// #include "model.hpp"
+// #include "shaders.hpp"
 #include <exception>
+#include <string>
 
 namespace vks { namespace pipelines {
+
 struct PipelineRasterizationStateCreateInfo : public vk::PipelineRasterizationStateCreateInfo {
     using Parent = vk::PipelineRasterizationStateCreateInfo;
     PipelineRasterizationStateCreateInfo() {
@@ -30,7 +35,7 @@ public:
                                       vk::BlendFactor srcAlphaBlendFactor_ = vk::BlendFactor::eZero,
                                       vk::BlendFactor dstAlphaBlendFactor_ = vk::BlendFactor::eZero,
                                       vk::BlendOp alphaBlendOp_ = vk::BlendOp::eAdd,
-                                      vk::ColorComponentFlags colorWriteMask_ = vks::util::fullColorWriteMask())
+                                      vk::ColorComponentFlags colorWriteMask_ = vk::FlagTraits<vk::ColorComponentFlagBits>::allFlags)
         : Parent(blendEnable_,
                  srcColorBlendFactor_,
                  dstColorBlendFactor_,
@@ -66,17 +71,9 @@ struct PipelineVertexInputStateCreateInfo : public vk::PipelineVertexInputStateC
     std::vector<vk::VertexInputBindingDescription> bindingDescriptions;
     std::vector<vk::VertexInputAttributeDescription> attributeDescriptions;
 
-    void appendVertexLayout(const vks::model::VertexLayout& vertexLayout, uint32_t binding = 0, vk::VertexInputRate rate = vk::VertexInputRate::eVertex) {
-        bindingDescriptions.emplace_back(binding, vertexLayout.stride(), rate);
-        auto componentsSize = vertexLayout.components.size();
-        attributeDescriptions.reserve(attributeDescriptions.size() + componentsSize);
-        auto attributeIndexOffset = (uint32_t)attributeDescriptions.size();
-        for (uint32_t i = 0; i < componentsSize; ++i) {
-            const auto& component = vertexLayout.components[i];
-            const auto format = vks::model::VertexLayout::componentFormat(component);
-            const auto offset = vertexLayout.offset(i);
-            attributeDescriptions.emplace_back(attributeIndexOffset + i, binding, format, offset);
-        }
+    void erase(uint32_t i) {
+        // FIXME instead erase the item where the binding location is equal to i
+        attributeDescriptions.erase(attributeDescriptions.begin() + i);
     }
 
     void update() {
@@ -111,14 +108,19 @@ struct PipelineViewportStateCreateInfo : public vk::PipelineViewportStateCreateI
 };
 
 struct PipelineDepthStencilStateCreateInfo : public vk::PipelineDepthStencilStateCreateInfo {
-    PipelineDepthStencilStateCreateInfo(bool depthEnable = true) {
+    PipelineDepthStencilStateCreateInfo& operator=(bool depthEnable) {
         if (depthEnable) {
             depthTestEnable = VK_TRUE;
             depthWriteEnable = VK_TRUE;
             depthCompareOp = vk::CompareOp::eLessOrEqual;
+        } else {
+            depthTestEnable = VK_FALSE;
+            depthWriteEnable = VK_FALSE;
         }
+        return *this;
     }
 };
+
 struct GraphicsPipelineBuilder {
 private:
     void init() {
@@ -133,15 +135,14 @@ private:
     }
 
 public:
-    GraphicsPipelineBuilder(const vk::Device& device, const vk::PipelineLayout layout, const vk::RenderPass& renderPass)
+    GraphicsPipelineBuilder(const vk::Device& device, const vk::PipelineLayout layout)
         : device(device) {
         pipelineCreateInfo.layout = layout;
-        pipelineCreateInfo.renderPass = renderPass;
+        depthStencilState = true;
         init();
     }
 
-    GraphicsPipelineBuilder(const GraphicsPipelineBuilder& other)
-        : GraphicsPipelineBuilder(other.device, other.layout, other.renderPass) {}
+    GraphicsPipelineBuilder(const GraphicsPipelineBuilder& other) = default;
 
     GraphicsPipelineBuilder& operator=(const GraphicsPipelineBuilder& other) = delete;
 
@@ -161,10 +162,31 @@ public:
     PipelineColorBlendStateCreateInfo colorBlendState;
     PipelineVertexInputStateCreateInfo vertexInputState;
     std::vector<vk::PipelineShaderStageCreateInfo> shaderStages;
-
     vk::GraphicsPipelineCreateInfo pipelineCreateInfo;
+    vk::PipelineRenderingCreateInfo renderingCreateInfo;
+    std::vector<vk::Format> colorAttachmentFormats;
+
+    void dynamicRendering(vk::Format colorFormat, vk::Format depthStencilFormat = vk::Format::eUndefined) {
+        dynamicRendering(colorFormat, depthStencilFormat, depthStencilFormat);
+    }
+
+    void dynamicRendering(const vk::ArrayProxy<const vk::Format>& colorFormats, vk::Format depthFormat, vk::Format stencilFormat) {
+        colorAttachmentFormats.clear();
+        for (const auto& colorFormat : colorFormats) {
+            colorAttachmentFormats.push_back(colorFormat);
+        }
+        renderingCreateInfo.depthAttachmentFormat = depthFormat;
+        renderingCreateInfo.stencilAttachmentFormat = stencilFormat;
+    }
 
     void update() {
+        if (!colorAttachmentFormats.empty()) {
+            renderingCreateInfo.colorAttachmentCount = (uint32_t)colorAttachmentFormats.size();
+            renderingCreateInfo.pColorAttachmentFormats = colorAttachmentFormats.data();
+            if (!containsNext(pipelineCreateInfo, renderingCreateInfo)) {
+                injectNext(pipelineCreateInfo, renderingCreateInfo);
+            }
+        }
         pipelineCreateInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
         pipelineCreateInfo.pStages = shaderStages.data();
         dynamicState.update();
@@ -174,15 +196,31 @@ public:
     }
 
     void destroyShaderModules() {
-        for (const auto shaderStage : shaderStages) {
-            device.destroyShaderModule(shaderStage.module);
+        for (const auto& shaderStage : shaderStages) {
+            device.destroy(shaderStage.module);
         }
         shaderStages.clear();
     }
 
-    // Load a SPIR-V shader
+// Load a SPIR-V shader
+#if 0
     vk::PipelineShaderStageCreateInfo& loadShader(const std::string& fileName, vk::ShaderStageFlagBits stage, const char* entryPoint = "main") {
         vk::PipelineShaderStageCreateInfo shaderStage = vks::shaders::loadShader(device, fileName, stage, entryPoint);
+        shaderStages.push_back(shaderStage);
+        return shaderStages.back();
+    }
+#endif
+
+    // Load a SPIR-V shader
+    vk::PipelineShaderStageCreateInfo& loadShader(const vk::ArrayProxy<const uint8_t>& code, vk::ShaderStageFlagBits stage, const char* entryPoint = "main") {
+        vk::PipelineShaderStageCreateInfo shaderStage = vks::shaders::loadShader(device, code, stage, entryPoint);
+        shaderStages.push_back(shaderStage);
+        return shaderStages.back();
+    }
+
+    // Load a SPIR-V shader
+    vk::PipelineShaderStageCreateInfo& loadShader(const vk::ArrayProxy<const uint32_t>& code, vk::ShaderStageFlagBits stage, const char* entryPoint = "main") {
+        vk::PipelineShaderStageCreateInfo shaderStage = vks::shaders::loadShader(device, code, stage, entryPoint);
         shaderStages.push_back(shaderStage);
         return shaderStages.back();
     }

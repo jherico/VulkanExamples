@@ -1,19 +1,21 @@
 /*
-* Vulkan Model loader using ASSIMP
-*
-* Copyright(C) 2016-2017 by Sascha Willems - www.saschawillems.de
-*
-* This code is licensed under the MIT license(MIT) (http://opensource.org/licenses/MIT)
-*/
+ * Vulkan Model loader using ASSIMP
+ *
+ * Copyright(C) 2016-2017 by Sascha Willems - www.saschawillems.de
+ *
+ * This code is licensed under the MIT license(MIT) (http://opensource.org/licenses/MIT)
+ */
 
 #include "model.hpp"
-#include "filesystem.hpp"
+#include <rendering/loader.hpp>
+
+#include <common/filesystem.hpp>
 
 #include <assimp/Importer.hpp>
-#include <assimp/scene.h>
-#include <assimp/postprocess.h>
 #include <assimp/cimport.h>
 #include <assimp/material.h>
+#include <assimp/postprocess.h>
+#include <assimp/scene.h>
 
 using namespace vks;
 using namespace vks::model;
@@ -21,20 +23,23 @@ using namespace vks::model;
 const int Model::defaultFlags =
     aiProcess_FlipWindingOrder | aiProcess_Triangulate | aiProcess_PreTransformVertices | aiProcess_CalcTangentSpace | aiProcess_GenSmoothNormals;
 
-void Model::loadFromFile(const Context& context, const std::string& filename, const VertexLayout& layout_, const ModelCreateInfo& createInfo, const int flags) {
+void Model::loadFromFile(const std::string& filename, const VertexLayout& layout_, const ModelCreateInfo& createInfo, const int flags) {
+    static const auto& context = vks::Context::get();
+    static const auto& device = context.device;
+    static const auto& loader = vks::Loader::get();
     layout = layout_;
     scale = createInfo.scale;
     uvscale = createInfo.uvscale;
     center = createInfo.center;
     destroy();
-    device = context.device;
+    // device = context.device;
 
     Assimp::Importer importer;
     const aiScene* pScene;
 
     // Load file
-    vks::file::withBinaryFileContents(filename, [flags, &pScene, &importer](const char* filename_, size_t size, const void* data) {
-        pScene = importer.ReadFileFromMemory(data, size, flags, filename_);
+    vks::file::withBinaryFileContents(filename, [flags, &pScene, &importer](const char* filename_, vks::file::Span span) {
+        pScene = importer.ReadFileFromMemory(span.data(), span.size(), flags, filename_);
     });
 
     if (!pScene) {
@@ -55,7 +60,7 @@ void Model::loadFromFile(const Context& context, const std::string& filename, co
         vertexCount += paiMesh->mNumVertices;
     }
 
-    onLoad(context, importer, pScene);
+    onLoad(importer, pScene);
 
     std::vector<uint8_t> vertexBuffer;
     std::vector<uint32_t> indexBuffer;
@@ -88,11 +93,12 @@ void Model::loadFromFile(const Context& context, const std::string& filename, co
         indexCount += part.indexCount;
     }
 
-
+    vks::QueueManager queueManager{ device, context.queuesInfo.graphics };
     // Vertex buffer
-    vertices = context.stageToDeviceBuffer(vk::BufferUsageFlagBits::eVertexBuffer, vertexBuffer);
+    vertices = loader.stageToDeviceBuffer(queueManager, vk::BufferUsageFlagBits::eVertexBuffer, vertexBuffer);
     // Index buffer
-    indices = context.stageToDeviceBuffer(vk::BufferUsageFlagBits::eIndexBuffer, indexBuffer);
+    indices = loader.stageToDeviceBuffer(queueManager, vk::BufferUsageFlagBits::eIndexBuffer, indexBuffer);
+    queueManager.destroy();
 };
 
 void Model::appendVertex(std::vector<uint8_t>& outputBuffer, const aiScene* pScene, uint32_t meshIndex, uint32_t vertexIndex) {
@@ -159,7 +165,6 @@ void Model::appendVertex(std::vector<uint8_t>& outputBuffer, const aiScene* pSce
                 break;
             default:
                 throw new std::invalid_argument("Bad case");
-
         };
     }
     appendOutput(outputBuffer, vertexBuffer);
@@ -167,4 +172,3 @@ void Model::appendVertex(std::vector<uint8_t>& outputBuffer, const aiScene* pSce
     dim.max = glm::max(scaledPos, dim.max);
     dim.min = glm::min(scaledPos, dim.min);
 }
-

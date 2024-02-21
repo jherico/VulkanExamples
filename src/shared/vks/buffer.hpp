@@ -18,57 +18,61 @@ namespace vks {
     * @note To be filled by an external source like the VulkanDevice
     */
 struct Buffer : public Allocation {
+    static void relocate(const VmaDefragmentationMove& move, Buffer& buffer);
+
 private:
     using Parent = Allocation;
 
 public:
+    vk::BufferCreateInfo createInfo;
     vk::Buffer buffer;
+
     /** @brief Usage flags to be filled by external source at buffer creation (to query at some later point) */
-    vk::BufferUsageFlags usageFlags;
     vk::DescriptorBufferInfo descriptor;
+
+    struct Builder : public Parent::Builder<vks::Buffer::Builder> {
+        vk::BufferCreateInfo createInfo;
+
+        Builder(vk::DeviceSize size) { createInfo.size = size; }
+
+        Builder& withBufferUsage(const vk::BufferUsageFlags& usage) {
+            createInfo.usage = usage;
+            return *this;
+        }
+
+        Buffer build() const {
+            return Buffer{ createInfo, allocationCreateInfo };
+        }
+    };
+
+    Buffer() = default;
+    Buffer(const Buffer& other) = delete;
+    Buffer(Buffer&& other);
+    Buffer& operator=(Buffer&& other);
+
+protected: 
+    Buffer(const vk::BufferCreateInfo& bufferCreateInfo, const VmaAllocationCreateInfo& allocationCreateInfo);
+
+public:
+
+    void create(const Builder& builder);
+    vk::DescriptorBufferInfo getDescriptor(vk::DeviceSize offset = 0, vk::DeviceSize range = VK_WHOLE_SIZE) const;
 
     operator bool() const { return buffer.operator bool(); }
 
-    /** 
-        * Attach the allocated memory block to the buffer
-        * 
-        * @param offset (Optional) Byte offset (from the beginning) for the memory region to bind
-        * 
-        * @return VkResult of the bindBufferMemory call
-        */
-    void bind(vk::DeviceSize offset = 0) { return device.bindBufferMemory(buffer, memory, offset); }
-
-    /**
-        * Setup the default descriptor for this buffer
-        *
-        * @param size (Optional) Size of the memory range of the descriptor
-        * @param offset (Optional) Byte offset from beginning
-        *
-        */
-    void setupDescriptor(vk::DeviceSize size = VK_WHOLE_SIZE, vk::DeviceSize offset = 0) {
-        descriptor.offset = offset;
-        descriptor.buffer = buffer;
-        descriptor.range = size;
+    void free() override {
+        unmap();
+        vmaDestroyBuffer(allocator, buffer, allocation);
+        allocation = VK_NULL_HANDLE;
+        allocInfo = {};
     }
 
     /**
-        * Copies the specified data to the mapped buffer
-        * 
-        * @param data Pointer to the data to copy
-        * @param size Size of the data to copy in machine units
-        *
-        */
-    void copyTo(void* data, vk::DeviceSize size) {
-        assert(mapped);
-        memcpy(mapped, data, size);
-    }
-
-    /** 
         * Release all Vulkan resources held by this buffer
         */
     void destroy() override {
         if (buffer) {
-            device.destroy(buffer);
+            free();
             buffer = vk::Buffer{};
         }
         Parent::destroy();
