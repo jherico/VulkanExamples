@@ -149,7 +149,8 @@ public:
     // Retrieves the results of the pipeline statistics query submitted to the command buffer
     void getQueryResults() {
         // We use vkGetQueryResults to copy the results into a host visible buffer
-        device.getQueryPoolResults<uint64_t>(queryPool, 0, 1, pipelineStats, sizeof(uint64_t), vk::QueryResultFlagBits::e64);
+        uint32_t count = static_cast<uint32_t>(pipelineStats.size());
+        device.getQueryPoolResults(queryPool, 0, 1, count * sizeof(uint64_t), pipelineStats.data(), sizeof(uint64_t), vk::QueryResultFlagBits::e64);
     }
 
     void loadAssets() override {

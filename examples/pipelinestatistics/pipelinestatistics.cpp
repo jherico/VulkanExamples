@@ -124,7 +124,7 @@ public:
     // Retrieves the results of the pipeline statistics query submitted to the command buffer
     void getQueryResults() {
         uint32_t count = static_cast<uint32_t>(pipelineStats.size());
-        device.getQueryPoolResults<uint64_t>(queryPool, 0, 1, pipelineStats, sizeof(uint64_t), vk::QueryResultFlagBits::e64);
+        device.getQueryPoolResults(queryPool, 0, 1, count * sizeof(uint64_t), pipelineStats.data(), sizeof(uint64_t), vk::QueryResultFlagBits::e64);
     }
 
     void updateCommandBufferPreDraw(const vk::CommandBuffer& drawCmdBuffer) override {

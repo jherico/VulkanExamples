@@ -29,7 +29,7 @@ vk::SurfaceKHR Window::createWindowSurface(GLFWwindow* window, const vk::Instanc
     VkSurfaceKHR rawSurface;
     vk::Result result =
         static_cast<vk::Result>(glfwCreateWindowSurface((VkInstance)instance, window, reinterpret_cast<const VkAllocationCallbacks*>(pAllocator), &rawSurface));
-    return vk::createResultValue(result, rawSurface, "vk::CommandBuffer::begin");
+    return {vk::ResultValue<VkSurfaceKHR>(result, rawSurface).value};
 }
 #endif
 
